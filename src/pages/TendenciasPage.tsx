@@ -67,10 +67,11 @@ function diasDesdeISO(iso: string): number {
   return Math.round((new Date(hoy).getTime() - new Date(iso).getTime()) / 86_400_000)
 }
 
-/** Casa por ID (sesiones nativas) o por nombreSnapshot cuando ejercicioId está vacío (importadas). */
+/** Casa por ID exacto (sesiones nativas) o por nombreSnapshot normalizado (sesiones de Supabase con ID sintético). */
 function matchesEjercicio(e: { ejercicioId: string; nombreSnapshot: string; completado: boolean }, ejercicioId: string, nombre: string): boolean {
   if (e.ejercicioId === ejercicioId) return true
-  return e.ejercicioId === '' && e.nombreSnapshot === nombre
+  if (e.nombreSnapshot && nombre && e.nombreSnapshot.trim().toLowerCase() === nombre.trim().toLowerCase()) return true
+  return false
 }
 
 function procesarDatos(sesiones: Sesion[], ejercicioId: string, nombre: string): PuntoSesion[] {

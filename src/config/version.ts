@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7.4'
+export const APP_VERSION = '1.7.5'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.7.5',
+    fecha: '02/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'matchesEjercicio: match por nombreSnapshot normalizado (trim+toLowerCase) para sesiones de Supabase',
+      'Eliminada condición restrictiva ejercicioId === "" — ahora siempre cae al nombre si no hay match por ID',
+      'cargarDatosUsuario: String()/Number() explícitos en lugar de "as" assertions para id/peso_kg',
+      'pullHistorialInvitado: ahora también actualiza registrosPeso vía actualizarPesosRemoto',
+      'Nuevo store action actualizarPesosRemoto: merge seguro de pesos remotos conservando pendientes locales',
+    ],
+  },
   {
     version: '1.7.4',
     fecha: '02/06/2026',

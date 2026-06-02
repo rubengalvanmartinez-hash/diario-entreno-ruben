@@ -118,11 +118,15 @@ export interface FitLogActions {
   /** Reemplaza la lista de ejercicios con los cargados desde Supabase (modo amigo) */
   importarEjercicios: (ejercicios: Ejercicio[]) => void
   /**
-   * Actualiza historialSesiones con datos remotos de Supabase (solo para invitados).
-   * - Fusiona: conserva sesiones locales pendientes (sincronizado=false) que no están en el remoto.
-   * - NO toca sesionActiva, registrosPeso ni ejercicios.
+   * Actualiza historialSesiones con datos remotos de Supabase.
+   * Fusiona: conserva sesiones locales pendientes (sincronizado=false) que no están en el remoto.
    */
   actualizarHistorialRemoto: (sesiones: Sesion[]) => void
+  /**
+   * Actualiza registrosPeso con datos remotos de Supabase.
+   * Fusiona: conserva pesos locales pendientes (sincronizado=false) que no están en el remoto.
+   */
+  actualizarPesosRemoto: (registrosPeso: RegistroPeso[]) => void
   /** Actualiza el timestamp del último sync para forzar re-render en suscriptores. */
   setUltimaSync: (ts: number) => void
 
@@ -569,6 +573,16 @@ export const useFitLogStore = create<FitLogStore>()(
           const merged = [...localPending, ...sesiones]
           console.log(`[Store] actualizarHistorialRemoto: local=${s.historialSesiones.length} remoto=${sesiones.length} resultado=${merged.length}`)
           return { historialSesiones: merged }
+        })
+      },
+
+      actualizarPesosRemoto(registrosPeso) {
+        set((s) => {
+          const remoteIds = new Set(registrosPeso.map((r) => r.id))
+          const localPending = s.registrosPeso.filter(
+            (r) => !r.sincronizado && !remoteIds.has(r.id),
+          )
+          return { registrosPeso: [...localPending, ...registrosPeso] }
         })
       },
 

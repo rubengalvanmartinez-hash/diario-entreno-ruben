@@ -426,9 +426,9 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
 
   // ── Reconstruir RegistroPeso[] ────────────────────────────────────────────
   const registrosPeso: RegistroPeso[] = (pesos ?? []).map((r) => ({
-    id: r.id as string,
-    fecha: r.fecha as string,
-    pesoKg: r.peso_kg as number,
+    id: String(r.id ?? ''),
+    fecha: String(r.fecha ?? ''),
+    pesoKg: Number(r.peso_kg),
     sincronizado: true,
   }))
 

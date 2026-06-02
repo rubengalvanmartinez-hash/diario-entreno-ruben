@@ -76,10 +76,13 @@ export async function pullHistorialInvitado(): Promise<void> {
   _pullInFlight = true
   try {
     const idSupabase = usuario.esRuben ? RUBEN_UUID : usuario.id
-    const { sesiones } = await cargarDatosUsuario(idSupabase)
-    console.log(`[Sync] Pull OK: remoto=${sesiones.length}`)
+    const { sesiones, registrosPeso } = await cargarDatosUsuario(idSupabase)
+    console.log(`[Sync] Pull OK: remoto=${sesiones.length} pesos=${registrosPeso.length}`)
     if (sesiones.length > 0) {
       useFitLogStore.getState().actualizarHistorialRemoto(sesiones)
+    }
+    if (registrosPeso.length > 0) {
+      useFitLogStore.getState().actualizarPesosRemoto(registrosPeso)
     }
     useFitLogStore.getState().setUltimaSync(Date.now())
     setPullStatus('ok')
