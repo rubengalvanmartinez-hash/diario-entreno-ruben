@@ -715,26 +715,26 @@ function PanelHistoricoSeries({
   const historial            = useFitLogStore(useShallow((s) => s.historialSesiones))
   const editarSerieHistorial = useFitLogStore((s) => s.editarSerieHistorial)
 
-  const [edit,         setEdit]         = useState<EditPending | null>(null)
-  const [confirmModal, setConfirmModal] = useState(false)
-  const [guardando,    setGuardando]    = useState(false)
-  const [errorMsg,     setErrorMsg]     = useState('')
+  // edit: celda actualmente en edición
+  const [edit,      setEdit]      = useState<EditPending | null>(null)
+  // pendiente: valor ya validado que espera confirmación en el modal
+  const [pendiente, setPendiente] = useState<EditPending | null>(null)
+  const [guardando, setGuardando] = useState(false)
+  const [errorMsg,  setErrorMsg]  = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Filas planas: una fila por serie con datos válidos, ordenadas por fecha desc → serie asc
-  // La celda "fecha" queda vacía en series 2+ del mismo día (estilo celdas combinadas Excel)
+  // Filas planas ordenadas fecha desc → serie asc, sin filas vacías
   const filas = useMemo(() => {
     type Fila = {
-      sesionId:   string
-      ejNombre:   string
-      fecha:      string   // ISO
-      mostrarFecha: boolean  // true solo en la primera serie del día
-      serieNum:   number
-      reps:       number
-      pesoKg:     number
+      sesionId:    string
+      ejNombre:    string
+      fecha:       string
+      mostrarFecha: boolean
+      serieNum:    number
+      reps:        number
+      pesoKg:      number
     }
     const result: Fila[] = []
-
     historial
       .filter((ses) => ses.ejercicios.some((e) => matchesEjercicio(e, ejercicioId, nombreEjercicio) && e.completado))
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
@@ -748,103 +748,90 @@ function PanelHistoricoSeries({
           .forEach((sr) => {
             const reps   = typeof sr.reps   === 'number' ? sr.reps   : 0
             const pesoKg = typeof sr.pesoKg === 'number' ? sr.pesoKg : 0
-            if (reps <= 0 && pesoKg <= 0) return   // omitir series sin datos
-            result.push({
-              sesionId: ses.id,
-              ejNombre,
-              fecha: ses.fecha,
-              mostrarFecha: primeraSerie,
-              serieNum: sr.numero,
-              reps,
-              pesoKg,
-            })
+            if (reps <= 0 && pesoKg <= 0) return
+            result.push({ sesionId: ses.id, ejNombre, fecha: ses.fecha, mostrarFecha: primeraSerie, serieNum: sr.numero, reps, pesoKg })
             primeraSerie = false
           })
       })
     return result
   }, [historial, ejercicioId, nombreEjercicio])
 
-  // Al desmontar el panel, liberar el flag por si acaso (red de seguridad)
-  useEffect(() => {
-    return () => { setEdicionEnCurso(false) }
-  }, [])
+  // Liberar flag al desmontar
+  useEffect(() => { return () => { setEdicionEnCurso(false) } }, [])
 
-  useEffect(() => {
-    if (edit) inputRef.current?.focus()
-  }, [edit])
+  useEffect(() => { if (edit) inputRef.current?.focus() }, [edit])
 
-  const iniciarEdicion = (
-    sesionId: string,
-    ejNombre: string,
-    serieNum: number,
-    campo: 'reps' | 'pesoKg',
-    valorActual: number,
-  ) => {
+  // ── Paso 1: tocar celda → abrir input ──────────────────────────────────────
+  const iniciarEdicion = (sesionId: string, ejNombre: string, serieNum: number, campo: 'reps' | 'pesoKg', valorActual: number) => {
+    console.log('[Edit] iniciarEdicion', { sesionId, ejNombre, serieNum, campo, valorActual })
     setErrorMsg('')
-    setEdicionEnCurso(true)   // pausar pull automático
+    setEdicionEnCurso(true)
     setEdit({ sesionId, ejNombre, serieNum, campo, valorOriginal: valorActual, valorStr: String(valorActual) })
   }
 
-  const handleGuardar = () => {
-    if (!edit) return
-    const v = parseFloat(edit.valorStr)
-    if (isNaN(v) || v <= 0) { setErrorMsg('Valor no válido'); return }
-    if (v === edit.valorOriginal) { setEdicionEnCurso(false); setEdit(null); return }
-    setConfirmModal(true)
+  const cancelarEdicion = () => {
+    console.log('[Edit] cancelarEdicion')
+    setEdicionEnCurso(false)
+    setEdit(null)
+    setErrorMsg('')
   }
 
+  // ── Paso 2: pulsar ✓ inline → validar y abrir modal ───────────────────────
+  const pedirConfirmacion = () => {
+    console.log('[Edit] pedirConfirmacion — edit:', edit)
+    if (!edit) return
+    const v = parseFloat(edit.valorStr)
+    console.log('[Edit] valor parseado:', v, '| original:', edit.valorOriginal)
+    if (isNaN(v) || v <= 0) { setErrorMsg('Valor no válido'); return }
+    if (v === edit.valorOriginal) { cancelarEdicion(); return }
+    // Guardar snapshot del edit en pendiente y cerrar input
+    setPendiente({ ...edit })
+    setEdit(null)   // cierra el input — el modal se abre sobre la tabla en reposo
+  }
+
+  // ── Paso 3: confirmar en el modal → guardar en Supabase ───────────────────
   const confirmarGuardar = async () => {
-    console.log('[Edit] Confirmar pulsado, iniciando guardado')
-    console.log('[Edit] edit state:', edit)
+    console.log('[Edit] confirmarGuardar — pendiente:', pendiente)
+    if (!pendiente) { console.warn('[Edit] pendiente es null'); return }
 
-    if (!edit) {
-      console.warn('[Edit] edit es null — return temprano')
-      return
-    }
-
-    const nuevoValor = parseFloat(edit.valorStr)
-    console.log('[Edit] nuevoValor parseado:', nuevoValor)
-
-    setConfirmModal(false)
+    const nuevoValor = parseFloat(pendiente.valorStr)
+    setPendiente(null)
     setGuardando(true)
     setErrorMsg('')
-    editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, nuevoValor)
+
+    // Actualización optimista en el store
+    editarSerieHistorial(pendiente.sesionId, pendiente.ejNombre, pendiente.serieNum, pendiente.campo, nuevoValor)
 
     const idActivo = getIdActivo()
     console.log('[Edit] idActivo:', idActivo)
-
     if (!idActivo) {
-      console.error('[Edit] getIdActivo() devolvió null — no hay usuario activo en localStorage')
-      editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, edit.valorOriginal)
-      setErrorMsg('Fallo: sin usuario activo — vuelve a hacer login')
+      editarSerieHistorial(pendiente.sesionId, pendiente.ejNombre, pendiente.serieNum, pendiente.campo, pendiente.valorOriginal)
+      setErrorMsg('Sin usuario activo — vuelve a hacer login')
       setGuardando(false)
       setEdicionEnCurso(false)
       return
     }
 
-    const campoDB: 'reps' | 'peso_kg' = edit.campo === 'reps' ? 'reps' : 'peso_kg'
-    console.log('[Edit] Llamando actualizarSerieSupabase con:', {
-      idActivo,
-      sesionId: edit.sesionId,
-      ejNombre: edit.ejNombre,
-      serieNum: edit.serieNum,
-      campoDB,
-      nuevoValor,
-    })
+    const campoDB: 'reps' | 'peso_kg' = pendiente.campo === 'reps' ? 'reps' : 'peso_kg'
+    console.log('[Edit] llamando actualizarSerieSupabase:', { idActivo, sesionId: pendiente.sesionId, ejNombre: pendiente.ejNombre, serieNum: pendiente.serieNum, campoDB, nuevoValor })
 
     try {
-      await actualizarSerieSupabase(idActivo, edit.sesionId, edit.ejNombre, edit.serieNum, campoDB, nuevoValor)
-      console.log('[Edit] actualizarSerieSupabase completado sin error')
-      setEdit(null)
+      await actualizarSerieSupabase(idActivo, pendiente.sesionId, pendiente.ejNombre, pendiente.serieNum, campoDB, nuevoValor)
+      console.log('[Edit] ✓ guardado en Supabase')
     } catch (err) {
-      console.error('[Edit] Error en actualizarSerieSupabase:', err)
-      editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, edit.valorOriginal)
-      const msg = err instanceof Error ? err.message : String(err)
-      setErrorMsg(`Fallo: ${msg}`)
+      console.error('[Edit] error Supabase:', err)
+      editarSerieHistorial(pendiente.sesionId, pendiente.ejNombre, pendiente.serieNum, pendiente.campo, pendiente.valorOriginal)
+      setErrorMsg(`Fallo: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setGuardando(false)
       setEdicionEnCurso(false)
     }
+  }
+
+  const cancelarModal = () => {
+    console.log('[Edit] cancelarModal')
+    setPendiente(null)
+    setEdicionEnCurso(false)
   }
 
   return (
@@ -861,45 +848,39 @@ function PanelHistoricoSeries({
             {filas.length} series · toca Reps o Kg para editar
           </p>
         </div>
-        {guardando && (
-          <span className="text-[10px] text-blue-400 font-semibold animate-pulse">Guardando…</span>
-        )}
+        {guardando && <span className="text-[10px] text-blue-400 font-semibold animate-pulse">Guardando…</span>}
       </div>
 
-      {/* ── Cabecera de tabla (sticky) ── */}
-      <div className="shrink-0 grid grid-cols-[90px_36px_1fr_1fr] bg-zinc-900 border-b border-zinc-700">
-        <span className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">Fecha</span>
+      {/* ── Cabecera de tabla ── */}
+      <div className="shrink-0 grid grid-cols-[80px_32px_1fr_1fr_48px] bg-zinc-900 border-b border-zinc-700">
+        <span className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500">Fecha</span>
         <span className="px-1 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500 text-center">S</span>
-        <span className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500 text-center">Reps</span>
-        <span className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500 text-center">Kg</span>
+        <span className="px-1 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500 text-center">Reps</span>
+        <span className="px-1 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-500 text-center">Kg</span>
+        <span />
       </div>
 
-      {/* ── Cuerpo de tabla (scroll) ── */}
+      {/* ── Cuerpo de tabla ── */}
       <div className="flex-1 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
-        {filas.length === 0 && (
-          <p className="text-center text-zinc-600 text-sm py-16">Sin series registradas.</p>
-        )}
+        {filas.length === 0 && <p className="text-center text-zinc-600 text-sm py-16">Sin series registradas.</p>}
 
         {filas.map((fila, idx) => {
-          const isEditReps = edit?.sesionId === fila.sesionId && edit.serieNum === fila.serieNum && edit.campo === 'reps'
-          const isEditKg   = edit?.sesionId === fila.sesionId && edit.serieNum === fila.serieNum && edit.campo === 'pesoKg'
-          const isActiveRow = (isEditReps || isEditKg)
-          // Separador visual entre días: línea más gruesa en la primera fila de cada día
-          const borderTop = fila.mostrarFecha && idx > 0
-            ? 'border-t border-zinc-600'
-            : 'border-t border-zinc-800/60'
+          const isEditReps  = edit?.sesionId === fila.sesionId && edit.serieNum === fila.serieNum && edit.campo === 'reps'
+          const isEditKg    = edit?.sesionId === fila.sesionId && edit.serieNum === fila.serieNum && edit.campo === 'pesoKg'
+          const isActiveRow = isEditReps || isEditKg
+          const borderTop   = fila.mostrarFecha && idx > 0 ? 'border-t border-zinc-600' : 'border-t border-zinc-800/60'
 
           return (
             <div
               key={`${fila.sesionId}-${fila.serieNum}`}
               className={[
-                'grid grid-cols-[90px_36px_1fr_1fr] items-center min-h-[34px]',
+                'grid grid-cols-[80px_32px_1fr_1fr_48px] items-center min-h-[36px]',
                 borderTop,
-                isActiveRow ? 'bg-blue-950/40' : idx % 2 === 0 ? 'bg-zinc-950' : 'bg-zinc-900/50',
+                isActiveRow ? 'bg-blue-950/50' : idx % 2 === 0 ? 'bg-zinc-950' : 'bg-zinc-900/50',
               ].join(' ')}
             >
-              {/* Fecha — solo en primera serie del día */}
-              <span className="px-3 py-1 text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">
+              {/* Fecha */}
+              <span className="px-2 py-1 text-[11px] text-zinc-400 tabular-nums whitespace-nowrap">
                 {fila.mostrarFecha ? fechaCorta(fila.fecha) : ''}
               </span>
 
@@ -909,7 +890,7 @@ function PanelHistoricoSeries({
               </span>
 
               {/* Reps */}
-              <div className="px-1 py-0.5 flex items-center justify-center">
+              <div className="px-1 flex items-center justify-center">
                 {isEditReps ? (
                   <input
                     ref={inputRef}
@@ -917,14 +898,14 @@ function PanelHistoricoSeries({
                     inputMode="numeric"
                     value={edit!.valorStr}
                     onChange={(e) => setEdit((p) => p ? { ...p, valorStr: e.target.value } : p)}
-                    className="w-full max-w-[56px] bg-blue-600/25 border border-blue-500 rounded px-1 py-0.5
+                    className="w-full max-w-[52px] bg-blue-600/25 border border-blue-400 rounded px-1 py-1
                                text-xs font-bold text-center text-white outline-none tabular-nums"
                   />
                 ) : (
                   <button
                     onClick={() => iniciarEdicion(fila.sesionId, fila.ejNombre, fila.serieNum, 'reps', fila.reps)}
-                    disabled={guardando}
-                    className="w-full text-[12px] font-medium text-zinc-300 text-center py-1
+                    disabled={guardando || !!edit}
+                    className="w-full text-[12px] font-medium text-zinc-300 text-center py-1.5
                                active:bg-zinc-700/60 rounded disabled:opacity-40 tabular-nums"
                   >
                     {fila.reps}
@@ -933,7 +914,7 @@ function PanelHistoricoSeries({
               </div>
 
               {/* Kg */}
-              <div className="px-1 py-0.5 flex items-center justify-center">
+              <div className="px-1 flex items-center justify-center">
                 {isEditKg ? (
                   <input
                     ref={inputRef}
@@ -941,89 +922,90 @@ function PanelHistoricoSeries({
                     inputMode="decimal"
                     value={edit!.valorStr}
                     onChange={(e) => setEdit((p) => p ? { ...p, valorStr: e.target.value } : p)}
-                    className="w-full max-w-[64px] bg-blue-600/25 border border-blue-500 rounded px-1 py-0.5
+                    className="w-full max-w-[60px] bg-blue-600/25 border border-blue-400 rounded px-1 py-1
                                text-xs font-bold text-center text-white outline-none tabular-nums"
                   />
                 ) : (
                   <button
                     onClick={() => iniciarEdicion(fila.sesionId, fila.ejNombre, fila.serieNum, 'pesoKg', fila.pesoKg)}
-                    disabled={guardando}
-                    className="w-full text-[12px] font-bold text-white text-center py-1
+                    disabled={guardando || !!edit}
+                    className="w-full text-[12px] font-bold text-white text-center py-1.5
                                active:bg-zinc-700/60 rounded disabled:opacity-40 tabular-nums"
                   >
                     {fila.pesoKg % 1 === 0 ? fila.pesoKg : fila.pesoKg.toFixed(1)}
                   </button>
                 )}
               </div>
+
+              {/* Botones inline ✓ / ✗ — solo en la fila activa */}
+              <div className="flex flex-col items-center justify-center gap-0.5 px-1">
+                {isActiveRow ? (
+                  <>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()} // evitar blur del input antes del click
+                      onClick={() => { console.log('[Edit] ✓ inline pulsado'); pedirConfirmacion() }}
+                      className="w-8 h-5 rounded bg-emerald-600 active:bg-emerald-500 flex items-center justify-center"
+                    >
+                      <span className="text-[10px] font-black text-white leading-none">✓</span>
+                    </button>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => cancelarEdicion()}
+                      className="w-8 h-5 rounded bg-zinc-700 active:bg-zinc-600 flex items-center justify-center"
+                    >
+                      <span className="text-[10px] font-black text-zinc-300 leading-none">✗</span>
+                    </button>
+                  </>
+                ) : null}
+              </div>
             </div>
           )
         })}
-
-        {/* Espacio para la barra inferior */}
-        <div className="h-20" />
+        <div className="h-6" />
       </div>
 
-      {/* ── Barra inferior (edición activa) ── */}
-      {edit && (
-        <div className="shrink-0 bg-zinc-900 border-t border-zinc-700 px-4 py-3 flex gap-2">
-          <button
-            onClick={() => { setEdicionEnCurso(false); setEdit(null); setErrorMsg('') }}
-            disabled={guardando}
-            className="flex-1 rounded-xl py-2.5 text-sm font-bold text-zinc-400 bg-zinc-800 active:bg-zinc-700 disabled:opacity-40"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleGuardar}
-            disabled={guardando}
-            className="flex-1 rounded-xl py-2.5 text-sm font-bold text-white bg-blue-600 active:bg-blue-700 disabled:opacity-40"
-          >
-            Guardar
-          </button>
-        </div>
-      )}
-
-      {/* ── Error toast (muestra el error completo de Supabase) ── */}
+      {/* ── Error toast ── */}
       {errorMsg && (
-        <div className="absolute bottom-24 left-2 right-2 z-10 bg-red-950 border border-red-700
+        <div className="absolute bottom-4 left-2 right-2 z-10 bg-red-950 border border-red-700
                         rounded-xl px-3 py-3 shadow-xl">
           <div className="flex items-start justify-between gap-2 mb-1">
-            <p className="text-xs font-bold text-red-300">Error Supabase</p>
+            <p className="text-xs font-bold text-red-300">Error</p>
             <button onClick={() => setErrorMsg('')} className="shrink-0"><X size={14} className="text-red-400" /></button>
           </div>
           <p className="text-[11px] text-red-200 leading-relaxed break-all font-mono">{errorMsg}</p>
         </div>
       )}
 
-      {/* ── Modal de confirmación ── */}
-      {confirmModal && edit && (
-        <div className="absolute inset-0 z-20 flex items-end justify-center bg-black/75 px-4 pb-6">
+      {/* ── Modal de confirmación (fuera del scroll, z-index alto) ── */}
+      {pendiente && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/80 px-4 pb-8">
           <div className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-2xl p-5 flex flex-col gap-4">
             <div className="flex items-start gap-3">
               <div className="size-8 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
                 <AlertTriangle size={16} className="text-amber-400" />
               </div>
               <div>
-                <p className="text-sm font-bold text-white">¿Confirmar edición?</p>
+                <p className="text-sm font-bold text-white">¿Guardar cambio?</p>
                 <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                  {edit.campo === 'reps' ? 'Reps' : 'Peso (kg)'}{' '}
-                  <span className="text-zinc-300">{edit.valorOriginal}</span>
+                  {pendiente.campo === 'reps' ? 'Reps' : 'Peso (kg)'}:{' '}
+                  <span className="text-zinc-300">{pendiente.valorOriginal}</span>
                   {' → '}
-                  <span className="text-white font-bold">{edit.valorStr}</span>.
-                  {' '}Modifica el historial permanentemente.
+                  <span className="text-white font-bold">{pendiente.valorStr}</span>
+                  <br />
+                  <span className="text-zinc-600">Modifica el historial permanentemente.</span>
                 </p>
               </div>
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setConfirmModal(false)}
-                className="flex-1 rounded-xl py-2.5 text-sm font-bold text-zinc-400 bg-zinc-800 active:bg-zinc-700"
+                onClick={cancelarModal}
+                className="flex-1 rounded-xl py-3 text-sm font-bold text-zinc-400 bg-zinc-800 active:bg-zinc-700"
               >
                 Cancelar
               </button>
               <button
                 onClick={confirmarGuardar}
-                className="flex-1 rounded-xl py-2.5 text-sm font-bold text-white bg-amber-600 active:bg-amber-700"
+                className="flex-1 rounded-xl py-3 text-sm font-bold text-white bg-amber-600 active:bg-amber-700"
               >
                 Confirmar
               </button>

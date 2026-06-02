@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.5'
+export const APP_VERSION = '1.8.6'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.8.6',
+    fecha: '02/06/2026',
+    tipo: 'media',
+    cambios: [
+      'PanelHistoricoSeries rediseñado: flujo de edición simple y robusto para iOS',
+      'Botones ✓/✗ inline por celda — sin barra inferior ni layout reflow al confirmar',
+      'Modal de confirmación cambiado a fixed inset-0 z-[60] — fiable en Safari iOS',
+      'onMouseDown preventDefault en botón ✓ — evita que blur del input robe el click',
+      'Dos estados independientes: edit (input activo) y pendiente (valor esperando confirmación)',
+    ],
+  },
   {
     version: '1.8.5',
     fecha: '02/06/2026',
