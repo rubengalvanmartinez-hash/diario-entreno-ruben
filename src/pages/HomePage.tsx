@@ -1,8 +1,18 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Dumbbell, Scale, AlertCircle, RefreshCw } from 'lucide-react'
+import { Dumbbell, Scale, AlertCircle, RefreshCw, Users, ChevronDown } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectTotalPendientes } from '../store/useFitLogStore'
+import {
+  getUsuarioActivo,
+  obtenerUsuarios,
+  cargarDatosUsuario,
+  obtenerEjerciciosUsuario,
+  crearEjerciciosDesdeTemplate,
+  setPerfilVisto,
+  getPerfilVisto,
+  type UsuarioSupabase,
+} from '../services/supabase'
 
 const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
 const MESES       = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
@@ -70,6 +80,9 @@ export default function HomePage() {
         />
       </div>
 
+      {/* Selector de perfil para admins */}
+      <SelectorPerfilAdmin />
+
       {/* Badge de sincronización pendiente */}
       {totalPendientes > 0 && (
         <div className="mt-auto flex items-center gap-2 rounded-xl bg-orange-500/10 border border-orange-500/25 px-4 py-3">
@@ -78,6 +91,95 @@ export default function HomePage() {
             {totalPendientes} registro{totalPendientes > 1 ? 's' : ''} pendiente{totalPendientes > 1 ? 's' : ''} de sincronizar
           </p>
           <RefreshCw size={14} className="text-orange-400 ml-auto shrink-0" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── SelectorPerfilAdmin ───────────────────────────────────────────────────────
+
+function SelectorPerfilAdmin() {
+  const navigate = useNavigate()
+  const usuario = getUsuarioActivo()
+
+  const [usuarios,   setUsuarios]   = useState<UsuarioSupabase[]>([])
+  const [cargando,   setCargando]   = useState(false)
+  const [cargandoDatos, setCargandoDatos] = useState(false)
+  const [abierto,    setAbierto]    = useState(false)
+  const perfilActivo = getPerfilVisto()
+
+  useEffect(() => {
+    if (!usuario?.esAdmin || !abierto || usuarios.length > 0) return
+    setCargando(true)
+    obtenerUsuarios()
+      .then(setUsuarios)
+      .catch(console.error)
+      .finally(() => setCargando(false))
+  }, [abierto]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!usuario?.esAdmin) return null
+
+  const handleSeleccionar = async (u: UsuarioSupabase) => {
+    setAbierto(false)
+    if (u.id === (perfilActivo?.id ?? '')) return // ya viendo este perfil
+    setCargandoDatos(true)
+    try {
+      setPerfilVisto({ id: u.id, nombre: u.nombre })
+      // Disparar evento storage para que Layout actualice el banner
+      window.dispatchEvent(new Event('storage'))
+      const { sesiones, registrosPeso } = await cargarDatosUsuario(u.id)
+      useFitLogStore.getState().importarHistorialCompleto(sesiones, registrosPeso)
+      const ejercicios = await obtenerEjerciciosUsuario(u.id)
+      if (ejercicios) {
+        useFitLogStore.getState().importarEjercicios(ejercicios)
+      } else {
+        const nuevos = await crearEjerciciosDesdeTemplate(u.id)
+        useFitLogStore.getState().importarEjercicios(nuevos)
+      }
+    } catch (e) { console.error(e) }
+    setCargandoDatos(false)
+    navigate('/', { replace: true })
+  }
+
+  if (cargandoDatos) {
+    return (
+      <div className="flex items-center gap-2 text-zinc-500 text-xs py-1">
+        <RefreshCw size={13} className="animate-spin" />
+        Cargando perfil…
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setAbierto(v => !v)}
+        className="flex items-center gap-2 text-xs font-semibold text-zinc-400 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-xl active:bg-zinc-800 transition-colors"
+      >
+        <Users size={14} className="text-zinc-500" />
+        Ver perfil de…
+        <ChevronDown size={13} className={['text-zinc-600 transition-transform', abierto ? 'rotate-180' : ''].join(' ')} />
+      </button>
+
+      {abierto && (
+        <div className="absolute top-full left-0 mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-xl z-40 overflow-hidden">
+          {cargando && (
+            <p className="text-xs text-zinc-500 px-4 py-3">Cargando…</p>
+          )}
+          {!cargando && usuarios.map((u, i) => (
+            <button
+              key={u.id}
+              onClick={() => handleSeleccionar(u)}
+              className={[
+                'w-full flex items-center gap-3 px-4 py-3 text-left active:bg-zinc-800 transition-colors',
+                i > 0 ? 'border-t border-zinc-800' : '',
+              ].join(' ')}
+            >
+              <span className="text-sm text-white font-medium">{u.nombre}</span>
+              {u.es_admin && <span className="text-[10px] text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded-full ml-auto">Admin</span>}
+            </button>
+          ))}
         </div>
       )}
     </div>

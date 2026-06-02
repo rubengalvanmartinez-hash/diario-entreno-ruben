@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.6.2'
+export const APP_VERSION = '1.7.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,22 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.7.0',
+    fecha: '02/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'Login unificado: formulario único con select Usuario + contraseña (elimina "Soy Rubén" / "Otros usuarios")',
+      'Primer acceso: si password_hash es null, el usuario crea su contraseña al primer login',
+      'Campo puede_peso_corporal: controla si el usuario ve la pestaña Peso y composición corporal',
+      'Admin: crear usuario solo con nombre (sin contraseña inicial)',
+      'Admin: toggles es_admin y puede_peso_corporal en la lista de usuarios',
+      'Admin: selector "Ver perfil de..." en la pantalla principal — lee y escribe entrenos del perfil elegido',
+      'Banner naranja en todas las pantallas cuando admin está viendo un perfil ajeno',
+      'Rubén detectado por UUID de BD — esRuben sigue protegiendo datos locales',
+      'Limpieza de caché del service worker en cada login exitoso',
+    ],
+  },
   {
     version: '1.6.2',
     fecha: '02/06/2026',

@@ -30,6 +30,7 @@ export interface UsuarioActivo {
   nombre: string
   esAdmin: boolean
   esRuben: boolean
+  puedePesoCorporal?: boolean
 }
 
 export interface UsuarioSupabase {
@@ -40,7 +41,42 @@ export interface UsuarioSupabase {
   altura_cm?: number
   sexo?: 'hombre' | 'mujer'
   es_admin: boolean
+  puede_peso_corporal?: boolean
   created_at?: string
+}
+
+// ── Perfil visto por admin ──────────────────────────────────────────────────
+
+export interface PerfilVisto {
+  id: string
+  nombre: string
+}
+
+export function getPerfilVisto(): PerfilVisto | null {
+  try {
+    const raw = localStorage.getItem('fitlog_perfil_visto')
+    return raw ? (JSON.parse(raw) as PerfilVisto) : null
+  } catch { return null }
+}
+
+export function setPerfilVisto(p: PerfilVisto): void {
+  localStorage.setItem('fitlog_perfil_visto', JSON.stringify(p))
+}
+
+export function clearPerfilVisto(): void {
+  localStorage.removeItem('fitlog_perfil_visto')
+}
+
+/**
+ * Devuelve el UUID que deben usar las operaciones de Supabase.
+ * Prioridad: perfilVisto → Rubén UUID → usuario activo UUID.
+ */
+export function getIdActivo(): string | null {
+  const perfil = getPerfilVisto()
+  if (perfil) return perfil.id
+  const u = getUsuarioActivo()
+  if (!u) return null
+  return u.esRuben ? getRubenUUID() : u.id
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +146,7 @@ export async function hashPassword(password: string): Promise<string> {
 export async function obtenerUsuarios(): Promise<UsuarioSupabase[]> {
   const { data, error } = await supabase
     .from('usuarios')
-    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, created_at')
+    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, puede_peso_corporal, created_at')
     .order('created_at', { ascending: true })
   if (error) throw error
   return (data ?? []) as UsuarioSupabase[]
@@ -131,12 +167,12 @@ export async function verificarPassword(userId: string, password: string): Promi
 export async function crearUsuario(datos: {
   nombre: string
   email?: string
-  password: string
+  password?: string   // opcional: si no se pasa, password_hash queda null (primer acceso)
   edad?: number
   altura_cm?: number
   sexo?: 'hombre' | 'mujer'
 }): Promise<UsuarioSupabase> {
-  const password_hash = await hashPassword(datos.password)
+  const password_hash = datos.password ? await hashPassword(datos.password) : null
   const { data, error } = await supabase
     .from('usuarios')
     .insert({
@@ -147,8 +183,9 @@ export async function crearUsuario(datos: {
       altura_cm: datos.altura_cm || null,
       sexo: datos.sexo || null,
       es_admin: false,
+      puede_peso_corporal: false,
     })
-    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, created_at')
+    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, puede_peso_corporal, created_at')
     .single()
   if (error) throw error
   return data as UsuarioSupabase
@@ -163,18 +200,43 @@ export async function actualizarUsuario(
     edad?: number
     altura_cm?: number
     sexo?: 'hombre' | 'mujer'
+    es_admin?: boolean
+    puede_peso_corporal?: boolean
   },
 ): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const update: Record<string, any> = {}
-  if (datos.nombre !== undefined) update.nombre = datos.nombre
-  if (datos.email !== undefined) update.email = datos.email || null
-  if (datos.edad !== undefined) update.edad = datos.edad || null
-  if (datos.altura_cm !== undefined) update.altura_cm = datos.altura_cm || null
-  if (datos.sexo !== undefined) update.sexo = datos.sexo || null
-  if (datos.password) update.password_hash = await hashPassword(datos.password)
+  if (datos.nombre !== undefined)              update.nombre              = datos.nombre
+  if (datos.email !== undefined)               update.email               = datos.email || null
+  if (datos.edad !== undefined)                update.edad                = datos.edad || null
+  if (datos.altura_cm !== undefined)           update.altura_cm           = datos.altura_cm || null
+  if (datos.sexo !== undefined)                update.sexo                = datos.sexo || null
+  if (datos.es_admin !== undefined)            update.es_admin            = datos.es_admin
+  if (datos.puede_peso_corporal !== undefined) update.puede_peso_corporal = datos.puede_peso_corporal
+  if (datos.password)                          update.password_hash       = await hashPassword(datos.password)
 
   const { error } = await supabase.from('usuarios').update(update).eq('id', id)
+  if (error) throw error
+}
+
+/** Devuelve true si el usuario no tiene contraseña establecida (primer acceso). */
+export async function tienePasswordVacio(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('password_hash')
+    .eq('id', userId)
+    .single()
+  if (error) return false
+  return !data?.password_hash
+}
+
+/** Establece la contraseña de un usuario (usado en el primer acceso). */
+export async function establecerPassword(userId: string, password: string): Promise<void> {
+  const hash = await hashPassword(password)
+  const { error } = await supabase
+    .from('usuarios')
+    .update({ password_hash: hash })
+    .eq('id', userId)
   if (error) throw error
 }
 

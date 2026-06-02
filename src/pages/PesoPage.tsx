@@ -20,10 +20,10 @@ export default function PesoPage() {
   const navigate = useNavigate()
   const registrarPeso = useFitLogStore((s) => s.registrarPeso)
 
-  // Modo amigo: esta página no está disponible
+  // Solo usuarios con puede_peso_corporal pueden acceder
   useEffect(() => {
     const usuario = getUsuarioActivo()
-    if (usuario && !usuario.esRuben) navigate('/', { replace: true })
+    if (usuario && !usuario.puedePesoCorporal) navigate('/', { replace: true })
   }, [navigate])
 
   const [valor,     setValor]     = useState('')
@@ -45,24 +45,24 @@ export default function PesoPage() {
       setGuardado(false)
     }, 2000)
     const usuario = getUsuarioActivo()
-    if (usuario && usuario.esRuben) {
-      const rubenUUID = getRubenUUID()
+    if (usuario && usuario.puedePesoCorporal) {
+      const uid = usuario.esRuben ? getRubenUUID() : usuario.id
       const fecha = new Date().toISOString().slice(0, 10)
       const { googleConfig, isAuthenticated } = useFitLogStore.getState()
       const registro = { id: '', fecha, pesoKg: numerico, sincronizado: false }
+      // Google Sheets solo para Rubén
       const sheetsPromise =
-        isAuthenticated && googleConfig.spreadsheetId
+        usuario.esRuben && isAuthenticated && googleConfig.spreadsheetId
           ? sincronizarPeso(googleConfig.accessToken, googleConfig.spreadsheetId, registro)
           : Promise.resolve()
       Promise.allSettled([
-        sincronizarPesoSupabase(rubenUUID, { fecha, pesoKg: numerico }),
+        sincronizarPesoSupabase(uid, { fecha, pesoKg: numerico }),
         sheetsPromise,
       ]).then((results) => {
-        // Marcar como sincronizado si Supabase tuvo éxito
         if (results[0].status === 'fulfilled' && pesoId) {
           useFitLogStore.getState().marcarPesoSincronizado(pesoId)
         }
-        const failed = results.find((r) => r.status === 'rejected')
+        const failed = results.find(r => r.status === 'rejected')
         if (failed && failed.status === 'rejected') {
           setSyncError(`Error sync: ${(failed.reason as Error)?.message ?? 'error desconocido'}`)
           setTimeout(() => setSyncError(null), 6000)

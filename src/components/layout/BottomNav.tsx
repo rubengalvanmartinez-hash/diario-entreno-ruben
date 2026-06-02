@@ -20,7 +20,7 @@ const NAV_ITEMS_AMIGO = [
 export default function BottomNav() {
   const { pathname } = useLocation()
   const usuario = getUsuarioActivo()
-  const navItems = usuario?.esRuben ? NAV_ITEMS_RUBEN : NAV_ITEMS_AMIGO
+  const navItems = usuario?.puedePesoCorporal ? NAV_ITEMS_RUBEN : NAV_ITEMS_AMIGO
 
   const isActive = (to: string) =>
     to === '/' ? pathname === '/' : pathname.startsWith(to)

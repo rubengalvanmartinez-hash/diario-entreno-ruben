@@ -6,7 +6,7 @@ import { obtenerImagen } from '../services/imageDB'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectProgresoTotal, selectProgresoCompletados } from '../store/useFitLogStore'
 import type { DiaId, SesionEjercicio, Serie } from '../types/models'
-import { getUsuarioActivo, sincronizarEntrenoSupabase, getRubenUUID } from '../services/supabase'
+import { getUsuarioActivo, sincronizarEntrenoSupabase, getRubenUUID, getPerfilVisto, getIdActivo } from '../services/supabase'
 import { pullHistorialInvitado } from '../hooks/useSupabaseSync'
 import { sincronizarSesion } from '../services/googleSheets'
 import { enqueueEjercicio, subscribeSyncStatus, type SyncStatus } from '../services/syncQueue'
@@ -253,8 +253,8 @@ export default function SesionPage() {
     })
     const usuario = getUsuarioActivo()
     if (usuario && sesionActiva) {
-      const uid = usuario.esRuben ? getRubenUUID() : usuario.id
-      enqueueEjercicio(uid, sesionActiva, datos)
+      const uid = getIdActivo() ?? ''
+      if (uid) enqueueEjercicio(uid, sesionActiva, datos)
     }
     const quedan = sesionActiva.ejercicios.filter((e, i) => i !== indice && !e.completado)
     if (quedan.length === 0) capturarYMostrarResumen()
@@ -279,8 +279,10 @@ export default function SesionPage() {
 
     // Sync en background — revertir si falla
     const doSync = async () => {
+      const uid = getIdActivo()
+      const perfilVisto = getPerfilVisto()
       try {
-        if (usuario.esRuben) {
+        if (usuario.esRuben && !perfilVisto) {
           const rubenUUID = getRubenUUID()
           const { googleConfig, isAuthenticated } = useFitLogStore.getState()
           const sheetsPromise =
@@ -295,9 +297,11 @@ export default function SesionPage() {
             useFitLogStore.getState().desmarcarSesionSincronizada(sesionId)
           }
         } else {
-          await sincronizarEntrenoSupabase(usuario.id, sesionCapturada)
-          // Pull para confirmar que el entreno llegó a Supabase y actualizar la vista
-          await pullHistorialInvitado()
+          // Invitado o admin viendo perfil: sync a Supabase con el ID activo
+          const syncId = uid ?? usuario.id
+          await sincronizarEntrenoSupabase(syncId, sesionCapturada)
+          // Pull solo si es invitado propio (no admin viendo perfil ajeno)
+          if (!perfilVisto) await pullHistorialInvitado()
         }
       } catch {
         useFitLogStore.getState().desmarcarSesionSincronizada(sesionId)

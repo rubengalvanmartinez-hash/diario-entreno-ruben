@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Dumbbell, Users, ChevronRight, Settings, X, Eye, EyeOff, LogIn, RefreshCw } from 'lucide-react'
+import { Dumbbell, Eye, EyeOff, RefreshCw, ChevronDown } from 'lucide-react'
 import {
   obtenerUsuarios,
   verificarPassword,
+  tienePasswordVacio,
+  establecerPassword,
   setUsuarioActivo,
   getUsuarioActivo,
   cerrarSesionLocal,
@@ -18,30 +20,7 @@ import {
 import { useFitLogStore } from '../store/useFitLogStore'
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function iniciales(nombre: string): string {
-  return nombre
-    .split(' ')
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? '')
-    .join('')
-}
-
-const COLORES_AVATAR = [
-  'bg-rose-800', 'bg-violet-800', 'bg-blue-800',
-  'bg-emerald-800', 'bg-amber-800', 'bg-cyan-800',
-]
-
-function colorAvatar(nombre: string): string {
-  let hash = 0
-  for (let i = 0; i < nombre.length; i++) hash = nombre.charCodeAt(i) + ((hash << 5) - hash)
-  return COLORES_AVATAR[Math.abs(hash) % COLORES_AVATAR.length]
-}
-
-// ---------------------------------------------------------------------------
-// Debug visible en pantalla — muestra estado de localStorage sin DevTools
+// Debug localStorage
 // ---------------------------------------------------------------------------
 
 function DebugLocalStorage() {
@@ -49,15 +28,13 @@ function DebugLocalStorage() {
 
   const obtenerInfo = () => {
     try {
-      const storeRuben  = localStorage.getItem('fitlog-store-ruben')
-      const storeLegacy = localStorage.getItem('fitlog-store')
-      const rubenUUID   = localStorage.getItem('fitlog-ruben-uuid')
+      const storeRuben    = localStorage.getItem('fitlog-store-ruben')
+      const storeLegacy   = localStorage.getItem('fitlog-store')
+      const rubenUUID     = localStorage.getItem('fitlog-ruben-uuid')
       const usuarioActivo = localStorage.getItem('fitlog_usuario_activo')
 
-      let sesiones = 0
-      let pesos    = 0
-      let fuente   = '(vacío)'
-
+      let sesiones = 0, pesos = 0
+      let fuente = '(vacío)'
       const raw = storeRuben || storeLegacy
       if (raw) {
         fuente = storeRuben ? 'fitlog-store-ruben' : 'fitlog-store (legacy)'
@@ -65,42 +42,27 @@ function DebugLocalStorage() {
         sesiones = parsed?.state?.historialSesiones?.length ?? 0
         pesos    = parsed?.state?.registrosPeso?.length ?? 0
       }
-
-      return {
-        fuente,
-        sesiones,
-        pesos,
-        rubenUUID: rubenUUID ?? '(no existe)',
-        usuarioActivo: usuarioActivo ?? '(no hay sesión)',
-        tieneStoreRuben:  !!storeRuben,
-        tieneStoreLegacy: !!storeLegacy,
-      }
-    } catch (e) {
-      return { error: String(e) }
-    }
+      return { fuente, sesiones, pesos, rubenUUID: rubenUUID ?? '(no existe)', usuarioActivo: usuarioActivo ?? '(no hay sesión)', tieneStoreRuben: !!storeRuben, tieneStoreLegacy: !!storeLegacy }
+    } catch (e) { return { error: String(e) } }
   }
 
   const info = obtenerInfo()
 
   return (
     <div className="w-full max-w-sm mt-6">
-      <button
-        onClick={() => setAbierto((v) => !v)}
-        className="w-full text-xs text-zinc-700 py-2 hover:text-zinc-500 transition-colors"
-      >
+      <button onClick={() => setAbierto(v => !v)} className="w-full text-xs text-zinc-700 py-2 hover:text-zinc-500 transition-colors">
         {abierto ? '▲ Ocultar debug' : '▼ Debug localStorage'}
       </button>
-
       {abierto && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mt-1 flex flex-col gap-2">
           {'error' in info ? (
             <p className="text-xs text-red-400 font-mono break-all">{info.error}</p>
           ) : (
             <>
-              <Row label="Fuente datos"      value={info.fuente}          ok={info.tieneStoreRuben || info.tieneStoreLegacy} />
-              <Row label="Sesiones locales"  value={String(info.sesiones)} ok={(info.sesiones ?? 0) > 0} />
-              <Row label="Pesos locales"     value={String(info.pesos)}    ok={(info.pesos ?? 0) > 0} />
-              <Row label="Rubén UUID"        value={info.rubenUUID}        ok={info.rubenUUID !== '(no existe)'} />
+              <RowDebug label="Fuente datos"     value={info.fuente}           ok={info.tieneStoreRuben || info.tieneStoreLegacy} />
+              <RowDebug label="Sesiones locales" value={String(info.sesiones)} ok={(info.sesiones ?? 0) > 0} />
+              <RowDebug label="Pesos locales"    value={String(info.pesos)}    ok={(info.pesos ?? 0) > 0} />
+              <RowDebug label="Rubén UUID"       value={info.rubenUUID}        ok={info.rubenUUID !== '(no existe)'} />
               <div className="border-t border-zinc-800 pt-2 mt-1">
                 <p className="text-[10px] text-zinc-600 font-mono break-all">{info.usuarioActivo}</p>
               </div>
@@ -112,7 +74,7 @@ function DebugLocalStorage() {
   )
 }
 
-function Row({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+function RowDebug({ label, value, ok }: { label: string; value: string; ok: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-xs text-zinc-500">{label}</span>
@@ -124,140 +86,255 @@ function Row({ label, value, ok }: { label: string; value: string; ok: boolean }
 }
 
 // ---------------------------------------------------------------------------
+// Pantalla de carga
+// ---------------------------------------------------------------------------
+
+function Cargando({ texto }: { texto: string }) {
+  return (
+    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center gap-4">
+      <div className="size-12 rounded-2xl bg-gradient-to-br from-red-800 to-rose-950 flex items-center justify-center">
+        <Dumbbell size={24} className="text-white" strokeWidth={1.8} />
+      </div>
+      <div className="flex items-center gap-2 text-zinc-400">
+        <RefreshCw size={16} className="animate-spin" />
+        <span className="text-sm font-medium">{texto}</span>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Componente principal
 // ---------------------------------------------------------------------------
+
+type Fase = 'login' | 'primer-acceso' | 'cargando-datos'
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const usuarioActual = getUsuarioActivo()
 
-  const [mostrarOtros,   setMostrarOtros]   = useState(false)
-  const [usuarios,       setUsuarios]       = useState<UsuarioSupabase[]>([])
-  const [cargando,       setCargando]       = useState(false)
-  const [errorLista,     setErrorLista]     = useState('')
-  const [cargandoDatos,  setCargandoDatos]  = useState(false)
+  const [usuarios,        setUsuarios]        = useState<UsuarioSupabase[]>([])
+  const [cargandoLista,   setCargandoLista]   = useState(true)
+  const [errorLista,      setErrorLista]      = useState('')
 
-  // Modal de contraseña
-  const [usuarioModal,   setUsuarioModal]   = useState<UsuarioSupabase | null>(null)
-  const [password,       setPassword]       = useState('')
-  const [showPass,       setShowPass]       = useState(false)
-  const [errorPass,      setErrorPass]      = useState('')
-  const [verificando,    setVerificando]    = useState(false)
+  // Campos del formulario de login
+  const [usuarioId,    setUsuarioId]    = useState('')
+  const [password,     setPassword]     = useState('')
+  const [showPass,     setShowPass]     = useState(false)
+  const [errorLogin,   setErrorLogin]   = useState('')
+  const [entrando,     setEntrando]     = useState(false)
+
+  // Primer acceso
+  const [fase,         setFase]         = useState<Fase>('login')
+  const [usuarioPrimerAcceso, setUsuarioPrimerAcceso] = useState<UsuarioSupabase | null>(null)
+  const [pass1,        setPass1]        = useState('')
+  const [pass2,        setPass2]        = useState('')
+  const [showPass1,    setShowPass1]    = useState(false)
+  const [showPass2,    setShowPass2]    = useState(false)
+  const [errorPrimer,  setErrorPrimer]  = useState('')
+  const [guardandoPass, setGuardandoPass] = useState(false)
 
   useEffect(() => {
-    if (!mostrarOtros) return
-    setCargando(true)
-    setErrorLista('')
+    setCargandoLista(true)
     obtenerUsuarios()
       .then(setUsuarios)
       .catch(() => setErrorLista('No se pudo conectar con el servidor.'))
-      .finally(() => setCargando(false))
-  }, [mostrarOtros])
+      .finally(() => setCargandoLista(false))
+  }, [])
+
+  // ── Limpiar caché del service worker ──────────────────────────────────────
 
   const limpiarCache = () => {
     if ('caches' in window) {
-      caches.keys().then((keys) => keys.forEach((key) => caches.delete(key)))
+      caches.keys().then(keys => keys.forEach(k => caches.delete(k)))
     }
   }
 
-  const entrarComoRuben = async () => {
-    limpiarCache()
-    setUsuarioActivo({ id: 'ruben', nombre: 'Rubén', esAdmin: true, esRuben: true })
-    await useFitLogStore.persist.rehydrate()
+  // ── Completar login tras verificación ────────────────────────────────────
 
-    // Asegurar que Rubén tiene fila en la tabla usuarios de Supabase (requisito FK).
-    // Se hace siempre, independientemente de si hay datos locales.
-    const rubenUUID = getRubenUUID()
-    try {
-      await asegurarUsuarioRuben(rubenUUID)
-    } catch {
-      // Sin conexión — continuar. El INSERT de sync fallará luego pero no bloquea el login.
+  const completarLogin = async (u: UsuarioSupabase) => {
+    limpiarCache()
+
+    const esRuben = u.id === getRubenUUID() || u.nombre === 'Rubén'
+
+    // Si es Rubén, actualizar fitlog-ruben-uuid con el UUID del DB
+    if (esRuben) {
+      localStorage.setItem('fitlog-ruben-uuid', u.id)
+      try { await asegurarUsuarioRuben(u.id) } catch { /* sin conexión: OK */ }
     }
 
-    // Rubén: localStorage es la fuente de verdad absoluta.
-    // NUNCA cargar de Supabase al hacer login — los datos locales siempre tienen prioridad.
+    setUsuarioActivo({
+      id:                esRuben ? 'ruben' : u.id,
+      nombre:            u.nombre,
+      esAdmin:           u.es_admin,
+      esRuben,
+      puedePesoCorporal: esRuben ? true : (u.puede_peso_corporal ?? false),
+    })
+
+    await useFitLogStore.persist.rehydrate()
+
+    if (esRuben) {
+      // Rubén: localStorage es la fuente de verdad absoluta — no cargar de Supabase
+      navigate('/', { replace: true })
+      return
+    }
+
+    // Amigos: cargar datos frescos de Supabase
+    setFase('cargando-datos')
+    try {
+      await forzarSincronizacionPendientes(u.id).catch(console.error)
+      const { sesiones, registrosPeso } = await cargarDatosUsuario(u.id)
+      useFitLogStore.getState().importarHistorialCompleto(sesiones, registrosPeso)
+      const ejercicios = await obtenerEjerciciosUsuario(u.id)
+      if (ejercicios) {
+        useFitLogStore.getState().importarEjercicios(ejercicios)
+      } else {
+        const nuevos = await crearEjerciciosDesdeTemplate(u.id)
+        useFitLogStore.getState().importarEjercicios(nuevos)
+      }
+    } catch { /* sin conexión: usar datos locales cacheados */ }
     navigate('/', { replace: true })
   }
 
-  const abrirModal = (u: UsuarioSupabase) => {
-    setUsuarioModal(u)
-    setPassword('')
-    setErrorPass('')
-    setShowPass(false)
-  }
+  // ── Entrar ────────────────────────────────────────────────────────────────
 
-  const cerrarModal = () => {
-    setUsuarioModal(null)
-    setPassword('')
-    setErrorPass('')
-  }
+  const handleEntrar = async () => {
+    if (!usuarioId || !password) return
+    const u = usuarios.find(x => x.id === usuarioId)
+    if (!u) return
 
-  const handleLogin = async () => {
-    if (!usuarioModal || !password) return
-    setVerificando(true)
-    setErrorPass('')
+    setErrorLogin('')
+    setEntrando(true)
     try {
-      const ok = await verificarPassword(usuarioModal.id, password)
+      // Comprobar primer acceso (password_hash null)
+      const sinPassword = await tienePasswordVacio(u.id)
+      if (sinPassword) {
+        // El campo password que introdujo el usuario es irrelevante — pedirle que cree contraseña
+        setUsuarioPrimerAcceso(u)
+        setPass1('')
+        setPass2('')
+        setErrorPrimer('')
+        setFase('primer-acceso')
+        return
+      }
+
+      const ok = await verificarPassword(u.id, password)
       if (ok) {
-        limpiarCache()
-        const usuario = {
-          id: usuarioModal.id,
-          nombre: usuarioModal.nombre,
-          esAdmin: usuarioModal.es_admin,
-          esRuben: false,
-        }
-        setUsuarioActivo(usuario)
-        await useFitLogStore.persist.rehydrate()
-        cerrarModal()
-        setCargandoDatos(true)
-        try {
-          // Subir primero los pendientes locales
-          await forzarSincronizacionPendientes(usuario.id).catch(console.error)
-          // Cargar datos frescos de Supabase y reemplazar el caché local
-          const { sesiones, registrosPeso } = await cargarDatosUsuario(usuario.id)
-          useFitLogStore.getState().importarHistorialCompleto(sesiones, registrosPeso)
-          // Cargar ejercicios (o crear desde plantilla si es nuevo)
-          const ejercicios = await obtenerEjerciciosUsuario(usuario.id)
-          if (ejercicios) {
-            useFitLogStore.getState().importarEjercicios(ejercicios)
-          } else {
-            const nuevos = await crearEjerciciosDesdeTemplate(usuario.id)
-            useFitLogStore.getState().importarEjercicios(nuevos)
-          }
-        } catch {
-          // Sin conexión: se usan los datos locales cacheados
-        } finally {
-          setCargandoDatos(false)
-        }
-        navigate('/', { replace: true })
+        await completarLogin(u)
       } else {
-        setErrorPass('Contraseña incorrecta. Inténtalo de nuevo.')
+        setErrorLogin('Usuario o contraseña incorrectos.')
       }
     } catch {
-      setErrorPass('Error de conexión. Comprueba tu red.')
+      setErrorLogin('Error de conexión. Comprueba tu red.')
     } finally {
-      setVerificando(false)
+      setEntrando(false)
     }
   }
 
-  if (cargandoDatos) {
+  // ── Crear contraseña (primer acceso) ──────────────────────────────────────
+
+  const handleCrearPassword = async () => {
+    if (!usuarioPrimerAcceso) return
+    if (!pass1) { setErrorPrimer('Escribe una contraseña.'); return }
+    if (pass1 !== pass2) { setErrorPrimer('Las contraseñas no coinciden.'); return }
+    if (pass1.length < 4) { setErrorPrimer('Mínimo 4 caracteres.'); return }
+
+    setGuardandoPass(true)
+    setErrorPrimer('')
+    try {
+      await establecerPassword(usuarioPrimerAcceso.id, pass1)
+      await completarLogin(usuarioPrimerAcceso)
+    } catch (err) {
+      setErrorPrimer((err as Error)?.message ?? 'Error al guardar la contraseña.')
+    } finally {
+      setGuardandoPass(false)
+    }
+  }
+
+  // ── Renders según fase ───────────────────────────────────────────────────
+
+  if (fase === 'cargando-datos') return <Cargando texto="Cargando datos..." />
+
+  // ── Primer acceso: crear contraseña ───────────────────────────────────────
+
+  if (fase === 'primer-acceso' && usuarioPrimerAcceso) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center gap-4">
-        <div className="size-12 rounded-2xl bg-gradient-to-br from-red-800 to-rose-950 flex items-center justify-center">
-          <Dumbbell size={24} className="text-white" strokeWidth={1.8} />
+      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center px-6 py-12">
+        <div className="flex flex-col items-center gap-5 mb-10">
+          <div className="size-20 rounded-3xl bg-gradient-to-br from-red-800 to-rose-950 flex items-center justify-center shadow-2xl shadow-red-900/40">
+            <Dumbbell size={36} className="text-white" strokeWidth={1.8} />
+          </div>
+          <div className="text-center">
+            <h1 className="text-2xl font-black text-white">Hola, {usuarioPrimerAcceso.nombre}</h1>
+            <p className="text-zinc-500 text-sm mt-1">Es tu primer acceso. Crea tu contraseña.</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-zinc-400">
-          <RefreshCw size={16} className="animate-spin" />
-          <span className="text-sm font-medium">Cargando datos...</span>
+
+        <div className="w-full max-w-sm flex flex-col gap-4">
+          {/* Nueva contraseña */}
+          <div className="relative">
+            <input
+              type={showPass1 ? 'text' : 'password'}
+              value={pass1}
+              onChange={e => setPass1(e.target.value)}
+              placeholder="Crea tu contraseña"
+              autoFocus
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-4 pr-12 text-white
+                         placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-red-700"
+            />
+            <button onClick={() => setShowPass1(v => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">
+              {showPass1 ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+
+          {/* Confirmar contraseña */}
+          <div className="relative">
+            <input
+              type={showPass2 ? 'text' : 'password'}
+              value={pass2}
+              onChange={e => setPass2(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleCrearPassword()}
+              placeholder="Confirma contraseña"
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-4 pr-12 text-white
+                         placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-red-700"
+            />
+            <button onClick={() => setShowPass2(v => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">
+              {showPass2 ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+
+          {errorPrimer && <p className="text-sm text-red-400 -mt-1">{errorPrimer}</p>}
+
+          <button
+            onClick={handleCrearPassword}
+            disabled={!pass1 || !pass2 || guardandoPass}
+            className={[
+              'w-full h-14 rounded-2xl text-base font-black flex items-center justify-center gap-2 transition-opacity',
+              pass1 && pass2 && !guardandoPass
+                ? 'bg-gradient-to-r from-red-800 to-rose-900 text-white'
+                : 'bg-zinc-800 text-zinc-600',
+            ].join(' ')}
+          >
+            {guardandoPass ? <RefreshCw size={18} className="animate-spin" /> : null}
+            {guardandoPass ? 'Guardando…' : 'Crear contraseña y entrar'}
+          </button>
+
+          <button onClick={() => setFase('login')} className="text-sm text-zinc-600 text-center py-1 hover:text-zinc-400 transition-colors">
+            ← Volver
+          </button>
         </div>
       </div>
     )
   }
 
+  // ── Login principal ───────────────────────────────────────────────────────
+
+  const usuarioSeleccionado = usuarios.find(u => u.id === usuarioId) ?? null
+
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center px-6 py-12">
 
-      {/* Sesión activa (banner si ya hay alguien logado) */}
+      {/* Sesión activa */}
       {usuarioActual && (
         <div className="absolute top-4 left-4 right-4 max-w-sm mx-auto bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
           <div>
@@ -265,205 +342,103 @@ export default function LoginPage() {
             <p className="text-sm font-bold text-white">{usuarioActual.nombre}</p>
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={() => navigate('/', { replace: true })}
-              className="text-xs font-bold text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-xl"
-            >
+            <button onClick={() => navigate('/', { replace: true })} className="text-xs font-bold text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-xl">
               Continuar
             </button>
-            <button
-              onClick={cerrarSesionLocal}
-              className="text-xs font-bold text-zinc-400 bg-zinc-800 px-3 py-1.5 rounded-xl"
-            >
+            <button onClick={cerrarSesionLocal} className="text-xs font-bold text-zinc-400 bg-zinc-800 px-3 py-1.5 rounded-xl">
               Salir
             </button>
           </div>
         </div>
       )}
 
-      {/* Logo + título */}
-      <div className="flex flex-col items-center gap-5 mb-12">
+      {/* Logo */}
+      <div className="flex flex-col items-center gap-5 mb-10">
         <div className="size-24 rounded-3xl bg-gradient-to-br from-red-800 to-rose-950 flex items-center justify-center shadow-2xl shadow-red-900/40">
           <Dumbbell size={44} className="text-white" strokeWidth={1.8} />
         </div>
         <div className="text-center">
-          <h1 className="text-4xl font-black text-white tracking-tight">
-            App de Rubén
-          </h1>
-          <p className="text-zinc-500 text-sm mt-2 font-medium">
-            Diario de entrenamiento personal
-          </p>
+          <h1 className="text-4xl font-black text-white tracking-tight">App de Rubén</h1>
+          <p className="text-zinc-500 text-sm mt-2 font-medium">Diario de entrenamiento personal</p>
         </div>
       </div>
 
-      {/* Botones de acceso */}
-      <div className="w-full max-w-sm flex flex-col gap-3">
+      {/* Formulario */}
+      <div className="w-full max-w-sm flex flex-col gap-4">
 
-        {/* Botón Rubén */}
-        <button
-          onClick={entrarComoRuben}
-          className="w-full h-16 rounded-2xl bg-gradient-to-r from-red-800 to-rose-900
-                     text-white text-lg font-black flex items-center justify-between px-6
-                     shadow-lg shadow-red-900/30 active:opacity-90 transition-opacity"
-        >
-          <span>Soy Rubén 💪</span>
-          <ChevronRight size={22} strokeWidth={2.5} />
-        </button>
-
-        {/* Botón Otros usuarios */}
-        <button
-          onClick={() => setMostrarOtros((v) => !v)}
-          className="w-full h-14 rounded-2xl bg-zinc-900 border border-zinc-800
-                     text-zinc-300 text-base font-bold flex items-center justify-between px-6
-                     active:bg-zinc-800 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <Users size={20} className="text-zinc-500" />
-            <span>Otros usuarios</span>
-          </div>
-          <ChevronRight
-            size={18}
-            className={['text-zinc-600 transition-transform', mostrarOtros ? 'rotate-90' : ''].join(' ')}
-          />
-        </button>
-
-        {/* Lista de usuarios */}
-        {mostrarOtros && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-            {cargando && (
-              <div className="px-5 py-6 text-center text-sm text-zinc-500">
-                Cargando usuarios…
-              </div>
-            )}
-
-            {errorLista && (
-              <div className="px-5 py-4 text-sm text-red-400 text-center">
-                {errorLista}
-              </div>
-            )}
-
-            {!cargando && !errorLista && usuarios.length === 0 && (
-              <div className="px-5 py-6 text-center text-sm text-zinc-600">
-                No hay usuarios registrados.
-              </div>
-            )}
-
-            {!cargando && usuarios.map((u, i) => (
-              <button
-                key={u.id}
-                onClick={() => abrirModal(u)}
-                className={[
-                  'w-full flex items-center gap-4 px-5 py-4 active:bg-zinc-800 transition-colors',
-                  i < usuarios.length - 1 ? 'border-b border-zinc-800' : '',
-                ].join(' ')}
-              >
-                {/* Avatar */}
-                <div className={[
-                  'size-11 rounded-full flex items-center justify-center shrink-0 text-white font-black text-sm',
-                  colorAvatar(u.nombre),
-                ].join(' ')}>
-                  {iniciales(u.nombre)}
-                </div>
-                {/* Info */}
-                <div className="flex-1 text-left">
-                  <p className="text-sm font-bold text-white">{u.nombre}</p>
-                  {u.email && (
-                    <p className="text-xs text-zinc-500 mt-0.5">{u.email}</p>
-                  )}
-                </div>
-                <LogIn size={16} className="text-zinc-600" />
-              </button>
+        {/* Select usuario */}
+        <div className="relative">
+          <select
+            value={usuarioId}
+            onChange={e => { setUsuarioId(e.target.value); setErrorLogin('') }}
+            disabled={cargandoLista}
+            className={[
+              'w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-4 pr-10 text-base appearance-none',
+              'focus:outline-none focus:ring-2 focus:ring-red-700',
+              usuarioId ? 'text-white' : 'text-zinc-500',
+              cargandoLista ? 'opacity-50' : '',
+            ].join(' ')}
+          >
+            <option value="">{cargandoLista ? 'Cargando usuarios…' : 'Selecciona usuario…'}</option>
+            {usuarios.map(u => (
+              <option key={u.id} value={u.id}>{u.nombre}</option>
             ))}
+          </select>
+          <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+        </div>
 
-            {/* Botón admin (solo si hay usuario activo con es_admin) */}
-            {usuarioActual?.esAdmin && (
-              <button
-                onClick={() => navigate('/admin/usuarios')}
-                className="w-full flex items-center gap-3 px-5 py-4 border-t border-zinc-800
-                           text-amber-500 active:bg-zinc-800 transition-colors"
-              >
-                <Settings size={16} />
-                <span className="text-sm font-bold">Administrar usuarios</span>
-              </button>
-            )}
-          </div>
+        {errorLista && (
+          <p className="text-xs text-red-400 -mt-1">{errorLista}</p>
         )}
+
+        {/* Contraseña */}
+        <div className="relative">
+          <input
+            type={showPass ? 'text' : 'password'}
+            value={password}
+            onChange={e => { setPassword(e.target.value); setErrorLogin('') }}
+            onKeyDown={e => e.key === 'Enter' && handleEntrar()}
+            placeholder="Contraseña"
+            disabled={!usuarioId}
+            className={[
+              'w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-4 pr-12 text-white text-base',
+              'placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-red-700',
+              !usuarioId ? 'opacity-40' : '',
+            ].join(' ')}
+          />
+          {usuarioId && (
+            <button onClick={() => setShowPass(v => !v)} className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">
+              {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          )}
+        </div>
+
+        {/* Hint primer acceso */}
+        {usuarioSeleccionado && (
+          <p className="text-xs text-zinc-600 -mt-1 px-1">
+            ¿Primera vez? Introduce cualquier texto y se te pedirá crear tu contraseña.
+          </p>
+        )}
+
+        {errorLogin && <p className="text-sm text-red-400 -mt-1">{errorLogin}</p>}
+
+        {/* Botón entrar */}
+        <button
+          onClick={handleEntrar}
+          disabled={!usuarioId || !password || entrando}
+          className={[
+            'w-full h-14 rounded-2xl text-base font-black flex items-center justify-center gap-2 transition-opacity',
+            usuarioId && password && !entrando
+              ? 'bg-gradient-to-r from-red-800 to-rose-900 text-white shadow-lg shadow-red-900/30'
+              : 'bg-zinc-800 text-zinc-600',
+          ].join(' ')}
+        >
+          {entrando && <RefreshCw size={18} className="animate-spin" />}
+          {entrando ? 'Verificando…' : 'Entrar'}
+        </button>
       </div>
 
-      {/* Debug localStorage — visible en pantalla para verificar datos de Rubén */}
       <DebugLocalStorage />
-
-      {/* Modal de contraseña */}
-      {usuarioModal && (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 px-4 flex flex-col items-center"
-          style={{ paddingTop: '32vh' }}
-          onClick={(e) => e.target === e.currentTarget && cerrarModal()}
-        >
-          <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-3xl p-6 flex flex-col gap-5
-                          animate-in fade-in zoom-in-95 duration-200">
-            {/* Header modal */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={[
-                  'size-11 rounded-full flex items-center justify-center text-white font-black text-sm',
-                  colorAvatar(usuarioModal.nombre),
-                ].join(' ')}>
-                  {iniciales(usuarioModal.nombre)}
-                </div>
-                <div>
-                  <p className="text-base font-bold text-white">{usuarioModal.nombre}</p>
-                  <p className="text-xs text-zinc-500">Introduce tu contraseña</p>
-                </div>
-              </div>
-              <button
-                onClick={cerrarModal}
-                className="size-8 flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Input contraseña */}
-            <div className="relative">
-              <input
-                type={showPass ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                placeholder="Contraseña"
-                autoFocus
-                className="w-full bg-zinc-800 rounded-2xl px-4 py-4 pr-12 text-white text-base
-                           placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-red-700"
-              />
-              <button
-                onClick={() => setShowPass((v) => !v)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500"
-              >
-                {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-
-            {errorPass && (
-              <p className="text-sm text-red-400 -mt-2">{errorPass}</p>
-            )}
-
-            {/* Botón entrar */}
-            <button
-              onClick={handleLogin}
-              disabled={!password || verificando}
-              className={[
-                'w-full h-14 rounded-2xl text-base font-black flex items-center justify-center gap-2 transition-opacity',
-                password && !verificando
-                  ? 'bg-gradient-to-r from-red-800 to-rose-900 text-white'
-                  : 'bg-zinc-800 text-zinc-600',
-              ].join(' ')}
-            >
-              {verificando ? 'Verificando…' : 'Entrar'}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
