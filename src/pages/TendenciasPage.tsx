@@ -794,28 +794,56 @@ function PanelHistoricoSeries({
   }
 
   const confirmarGuardar = async () => {
-    if (!edit) return
+    console.log('[Edit] Confirmar pulsado, iniciando guardado')
+    console.log('[Edit] edit state:', edit)
+
+    if (!edit) {
+      console.warn('[Edit] edit es null — return temprano')
+      return
+    }
+
     const nuevoValor = parseFloat(edit.valorStr)
+    console.log('[Edit] nuevoValor parseado:', nuevoValor)
+
     setConfirmModal(false)
     setGuardando(true)
     setErrorMsg('')
     editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, nuevoValor)
+
+    const idActivo = getIdActivo()
+    console.log('[Edit] idActivo:', idActivo)
+
+    if (!idActivo) {
+      console.error('[Edit] getIdActivo() devolvió null — no hay usuario activo en localStorage')
+      editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, edit.valorOriginal)
+      setErrorMsg('Fallo: sin usuario activo — vuelve a hacer login')
+      setGuardando(false)
+      setEdicionEnCurso(false)
+      return
+    }
+
+    const campoDB: 'reps' | 'peso_kg' = edit.campo === 'reps' ? 'reps' : 'peso_kg'
+    console.log('[Edit] Llamando actualizarSerieSupabase con:', {
+      idActivo,
+      sesionId: edit.sesionId,
+      ejNombre: edit.ejNombre,
+      serieNum: edit.serieNum,
+      campoDB,
+      nuevoValor,
+    })
+
     try {
-      const idActivo = getIdActivo()
-      if (!idActivo) throw new Error('Sin usuario activo')
-      const campoDB: 'reps' | 'peso_kg' = edit.campo === 'reps' ? 'reps' : 'peso_kg'
-      console.log('[confirmarGuardar] idActivo:', idActivo, '| sesionId:', edit.sesionId,
-        '| ejNombre:', JSON.stringify(edit.ejNombre), '| serieNum:', edit.serieNum,
-        '| campo:', campoDB, '| valor:', nuevoValor)
       await actualizarSerieSupabase(idActivo, edit.sesionId, edit.ejNombre, edit.serieNum, campoDB, nuevoValor)
+      console.log('[Edit] actualizarSerieSupabase completado sin error')
       setEdit(null)
     } catch (err) {
+      console.error('[Edit] Error en actualizarSerieSupabase:', err)
       editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, edit.valorOriginal)
       const msg = err instanceof Error ? err.message : String(err)
       setErrorMsg(`Fallo: ${msg}`)
     } finally {
       setGuardando(false)
-      setEdicionEnCurso(false)   // reanudar pull automático
+      setEdicionEnCurso(false)
     }
   }
 

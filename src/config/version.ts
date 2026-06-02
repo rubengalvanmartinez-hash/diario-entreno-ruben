@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.4'
+export const APP_VERSION = '1.8.5'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.8.5',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'confirmarGuardar: console.log como primera línea para verificar que se ejecuta',
+      'getIdActivo() sacado del try — si es null muestra toast y log explícito antes de retornar',
+      'Todos los parámetros enviados a actualizarSerieSupabase logueados antes de la llamada',
+      'Error de actualizarSerieSupabase logueado con console.error en el catch',
+    ],
+  },
   {
     version: '1.8.4',
     fecha: '02/06/2026',
