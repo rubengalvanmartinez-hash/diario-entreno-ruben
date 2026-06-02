@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7.0'
+export const APP_VERSION = '1.7.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.7.1',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'UUID de Rubén hardcodeado como constante RUBEN_UUID — nunca se genera uno aleatorio',
+      'getRubenUUID() siempre devuelve el UUID fijo y lo persiste en localStorage',
+      'asegurarUsuarioRuben() usa siempre RUBEN_UUID, ignora el parámetro — imposible crear usuario duplicado',
+      'asegurarUsuarioRuben() con ignoreDuplicates: true nunca sobrescribe password_hash ni datos existentes',
+    ],
+  },
   {
     version: '1.7.0',
     fecha: '02/06/2026',

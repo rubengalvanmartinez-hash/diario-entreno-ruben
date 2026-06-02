@@ -101,13 +101,13 @@ export function cerrarSesionLocal(): void {
   localStorage.removeItem('fitlog_usuario_activo')
 }
 
-/** Devuelve el UUID persistente de Rubén (lo crea con randomUUID si aún no existe). */
+/** UUID fijo de Rubén en Supabase — nunca cambia, nunca se genera uno nuevo. */
+export const RUBEN_UUID = '392a4716-66d9-40b3-bb26-131c8988e05a'
+
+/** Devuelve siempre el UUID fijo de Rubén y lo persiste en localStorage. */
 export function getRubenUUID(): string {
-  const stored = localStorage.getItem('fitlog-ruben-uuid')
-  if (stored) return stored
-  const uuid = crypto.randomUUID()
-  localStorage.setItem('fitlog-ruben-uuid', uuid)
-  return uuid
+  localStorage.setItem('fitlog-ruben-uuid', RUBEN_UUID)
+  return RUBEN_UUID
 }
 
 /**
@@ -116,12 +116,16 @@ export function getRubenUUID(): string {
  * Usa upsert con ignoreDuplicates para que sea idempotente (seguro llamarlo
  * varias veces sin crear duplicados).
  */
-export async function asegurarUsuarioRuben(uuid: string): Promise<void> {
-  const hash = await hashPassword('') // hash de contraseña vacía — Rubén no usa password
+/**
+ * Verifica que Rubén tiene fila en la tabla usuarios (FK constraint).
+ * Usa ignoreDuplicates: true — si ya existe NO actualiza nada (no toca password_hash).
+ * Siempre usa RUBEN_UUID, ignorando el parámetro uuid para evitar inserts con UUID aleatorio.
+ */
+export async function asegurarUsuarioRuben(_uuid?: string): Promise<void> {
   const { error } = await supabase
     .from('usuarios')
     .upsert(
-      { id: uuid, nombre: 'Rubén', es_admin: true, password_hash: hash },
+      { id: RUBEN_UUID, nombre: 'Rubén', es_admin: true, puede_peso_corporal: true },
       { onConflict: 'id', ignoreDuplicates: true },
     )
   if (error) throw error
