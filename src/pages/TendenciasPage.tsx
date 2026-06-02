@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { obtenerImagen } from '../services/imageDB'
 import { getUsuarioActivo, getIdActivo, actualizarSerieSupabase } from '../services/supabase'
+import { setEdicionEnCurso } from '../hooks/useSupabaseSync'
 import { generarInformePDF } from '../services/pdfReport'
 import type { Ejercicio, EtiquetaSerie, Sesion } from '../types/models'
 
@@ -763,6 +764,11 @@ function PanelHistoricoSeries({
     return result
   }, [historial, ejercicioId, nombreEjercicio])
 
+  // Al desmontar el panel, liberar el flag por si acaso (red de seguridad)
+  useEffect(() => {
+    return () => { setEdicionEnCurso(false) }
+  }, [])
+
   useEffect(() => {
     if (edit) inputRef.current?.focus()
   }, [edit])
@@ -775,6 +781,7 @@ function PanelHistoricoSeries({
     valorActual: number,
   ) => {
     setErrorMsg('')
+    setEdicionEnCurso(true)   // pausar pull automático
     setEdit({ sesionId, ejNombre, serieNum, campo, valorOriginal: valorActual, valorStr: String(valorActual) })
   }
 
@@ -782,7 +789,7 @@ function PanelHistoricoSeries({
     if (!edit) return
     const v = parseFloat(edit.valorStr)
     if (isNaN(v) || v <= 0) { setErrorMsg('Valor no válido'); return }
-    if (v === edit.valorOriginal) { setEdit(null); return }
+    if (v === edit.valorOriginal) { setEdicionEnCurso(false); setEdit(null); return }
     setConfirmModal(true)
   }
 
@@ -797,7 +804,6 @@ function PanelHistoricoSeries({
       const idActivo = getIdActivo()
       if (!idActivo) throw new Error('Sin usuario activo')
       const campoDB: 'reps' | 'peso_kg' = edit.campo === 'reps' ? 'reps' : 'peso_kg'
-      // Diagnóstico v1.8.2: log en consola del contexto que se va a enviar
       console.log('[confirmarGuardar] idActivo:', idActivo, '| sesionId:', edit.sesionId,
         '| ejNombre:', JSON.stringify(edit.ejNombre), '| serieNum:', edit.serieNum,
         '| campo:', campoDB, '| valor:', nuevoValor)
@@ -805,11 +811,11 @@ function PanelHistoricoSeries({
       setEdit(null)
     } catch (err) {
       editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, edit.valorOriginal)
-      // Mostrar el error REAL de Supabase en pantalla (útil en iPhone sin DevTools)
       const msg = err instanceof Error ? err.message : String(err)
       setErrorMsg(`Fallo: ${msg}`)
     } finally {
       setGuardando(false)
+      setEdicionEnCurso(false)   // reanudar pull automático
     }
   }
 
@@ -933,7 +939,7 @@ function PanelHistoricoSeries({
       {edit && (
         <div className="shrink-0 bg-zinc-900 border-t border-zinc-700 px-4 py-3 flex gap-2">
           <button
-            onClick={() => { setEdit(null); setErrorMsg('') }}
+            onClick={() => { setEdicionEnCurso(false); setEdit(null); setErrorMsg('') }}
             disabled={guardando}
             className="flex-1 rounded-xl py-2.5 text-sm font-bold text-zinc-400 bg-zinc-800 active:bg-zinc-700 disabled:opacity-40"
           >

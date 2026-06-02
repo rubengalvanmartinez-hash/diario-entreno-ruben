@@ -43,6 +43,22 @@ export async function refreshFromSupabase(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Flag: pausa el pull mientras el usuario está editando en PanelHistoricoSeries
+// ---------------------------------------------------------------------------
+
+let _edicionEnCurso = false
+
+/**
+ * Llama con true al entrar en modo edición de una serie, false al salir.
+ * Mientras sea true, pullHistorialInvitado NO sobreescribirá el historial.
+ */
+export function setEdicionEnCurso(v: boolean): void {
+  _edicionEnCurso = v
+  if (v) console.log('[Sync] Pull pausado — edición en curso')
+  else   console.log('[Sync] Pull reanudado — edición finalizada')
+}
+
+// ---------------------------------------------------------------------------
 // Pull automático para invitados
 // ---------------------------------------------------------------------------
 
@@ -70,6 +86,7 @@ export function usePullStatus(): PullStatus {
 
 export async function pullHistorialInvitado(): Promise<void> {
   if (_pullInFlight) return
+  if (_edicionEnCurso) return   // no sobreescribir mientras el usuario edita
   const usuario = getUsuarioActivo()
   if (!usuario) return
 

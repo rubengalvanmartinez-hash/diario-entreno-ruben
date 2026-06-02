@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.2'
+export const APP_VERSION = '1.8.3'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.8.3',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: pull automático cada 5s sobreescribía el historial mientras el usuario editaba una serie',
+      'Solución: flag _edicionEnCurso en useSupabaseSync — pullHistorialInvitado salta si está activo',
+      'setEdicionEnCurso(true) al empezar a editar, false en finally de guardar y en cancelar',
+      'useEffect cleanup en PanelHistoricoSeries libera el flag al cerrar el panel (red de seguridad)',
+    ],
+  },
   {
     version: '1.8.2',
     fecha: '02/06/2026',
