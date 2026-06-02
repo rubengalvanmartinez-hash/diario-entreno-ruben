@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown, ChevronRight, ArrowLeft, AlertTriangle, X } from 'lucide-react'
+import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown, ChevronRight, ChevronDown, ChevronUp, ArrowLeft, AlertTriangle, X } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
-import { obtenerImagen } from '../services/imageDB'
 import { getUsuarioActivo, getIdActivo, actualizarSerieSupabase } from '../services/supabase'
 import { setEdicionEnCurso } from '../hooks/useSupabaseSync'
 import { generarInformePDF } from '../services/pdfReport'
@@ -1026,53 +1025,78 @@ function SelectorEjercicio({
   seleccionado: string | null
   onSeleccionar: (id: string) => void
 }) {
+  const [abierto, setAbierto] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const seleccionadoObj = ejercicios.find((e) => e.id === seleccionado) ?? null
+
+  // Cerrar al tocar fuera del dropdown
+  useEffect(() => {
+    if (!abierto) return
+    const handler = (e: MouseEvent | TouchEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setAbierto(false)
+    }
+    document.addEventListener('mousedown', handler)
+    document.addEventListener('touchstart', handler)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('touchstart', handler)
+    }
+  }, [abierto])
+
+  // Agrupar por día (solo grupos con ejercicios)
+  const grupos = ([
+    { label: 'Día 1', items: ejercicios.filter((e) => e.dia === 1) },
+    { label: 'Día 2', items: ejercicios.filter((e) => e.dia === 2) },
+    { label: 'Día 3', items: ejercicios.filter((e) => e.dia === 3) },
+    { label: 'Otros',  items: ejercicios.filter((e) => e.dia !== 1 && e.dia !== 2 && e.dia !== 3) },
+  ] as const).filter((g) => g.items.length > 0)
+
   return (
-    <div
-      className="flex gap-2.5 px-4 pb-3 [&::-webkit-scrollbar]:hidden"
-      style={{
-        overflowX: 'auto',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        WebkitOverflowScrolling: 'touch' as any,
-        scrollSnapType: 'x mandatory',
-        touchAction: 'pan-x',
-        msOverflowStyle: 'none',
-        scrollbarWidth: 'none',
-      } as React.CSSProperties}
-    >
-      {ejercicios.map((ej) => (
-        <EjercicioChip key={ej.id} ejercicio={ej}
-          activo={ej.id === seleccionado}
-          onSeleccionar={() => onSeleccionar(ej.id)} />
-      ))}
+    <div ref={ref} className="relative px-4 pb-3">
+      {/* Botón selector cerrado */}
+      <button
+        onClick={() => setAbierto((v) => !v)}
+        className="w-full flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-3.5 text-left active:bg-zinc-800 transition-colors"
+      >
+        <span className="flex-1 text-sm font-semibold text-white truncate">
+          {seleccionadoObj ? seleccionadoObj.nombre : 'Seleccionar ejercicio…'}
+        </span>
+        {abierto
+          ? <ChevronUp size={16} className="text-zinc-400 shrink-0" />
+          : <ChevronDown size={16} className="text-zinc-400 shrink-0" />
+        }
+      </button>
+
+      {/* Menú desplegable */}
+      {abierto && (
+        <div className="absolute left-4 right-4 top-full mt-1.5 z-30 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="max-h-72 overflow-y-auto overscroll-contain">
+            {grupos.map((grupo) => (
+              <div key={grupo.label}>
+                <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 bg-zinc-950/70 sticky top-0">
+                  {grupo.label}
+                </div>
+                {grupo.items.map((ej) => (
+                  <button
+                    key={ej.id}
+                    onClick={() => { onSeleccionar(ej.id); setAbierto(false) }}
+                    className={[
+                      'w-full text-left px-4 py-3.5 text-sm font-medium border-b border-zinc-800/50 last:border-0 transition-colors',
+                      ej.id === seleccionado
+                        ? 'text-blue-400 bg-blue-500/10'
+                        : 'text-white active:bg-zinc-800',
+                    ].join(' ')}
+                  >
+                    {ej.nombre}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
-  )
-}
-
-function EjercicioChip({
-  ejercicio, activo, onSeleccionar,
-}: { ejercicio: Ejercicio; activo: boolean; onSeleccionar: () => void }) {
-  const [imagen, setImagen] = useState<string | null>(null)
-  useEffect(() => { obtenerImagen(ejercicio.id).then(setImagen) }, [ejercicio.id])
-
-  return (
-    <button onClick={onSeleccionar}
-      style={{ scrollSnapAlign: 'start' }}
-      className={[
-        'flex flex-col items-center gap-1.5 shrink-0 rounded-2xl p-2 w-[4.5rem] transition-colors',
-        activo ? 'bg-blue-600' : 'bg-zinc-900 border border-zinc-800 active:bg-zinc-800',
-      ].join(' ')}>
-      <div className="size-11 rounded-xl overflow-hidden bg-zinc-800 flex items-center justify-center">
-        {imagen
-          ? <img src={imagen} alt={ejercicio.nombre} className="w-full h-full object-cover" />
-          : <span className={['text-base font-black', activo ? 'text-blue-200' : 'text-zinc-500'].join(' ')}>
-              {ejercicio.nombre.charAt(0).toUpperCase()}
-            </span>}
-      </div>
-      <span className={[
-        'text-[10px] font-semibold text-center leading-tight line-clamp-2 w-full',
-        activo ? 'text-white' : 'text-zinc-400',
-      ].join(' ')}>{ejercicio.nombre}</span>
-    </button>
   )
 }
 

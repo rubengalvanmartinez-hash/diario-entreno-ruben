@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.9'
+export const APP_VERSION = '2.0.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.0.0',
+    fecha: '02/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'Tendencias: selector de ejercicio rediseñado — dropdown en una línea en lugar de carrusel horizontal',
+      'Menú desplegable agrupa ejercicios por Día 1 / Día 2 / Día 3 / Otros',
+      'Cerrar al tocar fuera del menú (mousedown + touchstart)',
+      'Ejercicio activo resaltado en azul dentro del menú',
+      'Menú con scroll interno limitado a 288px — cómodo con una mano en móvil',
+      'Eliminado EjercicioChip y carrusel con scroll horizontal',
+    ],
+  },
   {
     version: '1.9.9',
     fecha: '02/06/2026',
