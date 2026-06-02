@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.0.1'
+export const APP_VERSION = '2.0.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.0.2',
+    fecha: '03/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: scroll dentro del menú lo cerraba — touchstart en document solo chequeaba btnRef, no el menú',
+      'Fix: menuRef añadido al div del menú; handler cierra solo si el toque es fuera de btnRef Y menuRef',
+      'touchstart registrado con { passive: true } para no bloquear el scroll en iOS',
+      'maxHeight dinámico: mínimo entre 288px y 90% de pantalla desde el botón',
+      '-webkit-overflow-scrolling: touch para scroll fluido en iOS dentro del menú',
+    ],
+  },
   {
     version: '2.0.1',
     fecha: '03/06/2026',

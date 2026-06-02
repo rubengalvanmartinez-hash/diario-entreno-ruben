@@ -1026,31 +1026,33 @@ function SelectorEjercicio({
   onSeleccionar: (id: string) => void
 }) {
   const [abierto, setAbierto] = useState(false)
-  // Posición fija del menú — se recalcula en cada apertura
   const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
+  const btnRef  = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   const seleccionadoObj = ejercicios.find((e) => e.id === seleccionado) ?? null
 
   const handleToggle = () => {
-    console.log('[SelectorEjercicio] click — abierto actual:', abierto)
     if (!abierto && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect()
+      // Limitar la altura máxima al 60% de la pantalla desde el borde inferior del botón
       setMenuRect({ top: r.bottom + 6, left: r.left, width: r.width })
     }
     setAbierto((v) => !v)
   }
 
-  // Cerrar al tocar fuera
+  // Cerrar SOLO al tocar fuera TANTO del botón COMO del menú
   useEffect(() => {
     if (!abierto) return
     const handler = (e: MouseEvent | TouchEvent) => {
-      if (btnRef.current && !btnRef.current.contains(e.target as Node)) {
-        setAbierto(false)
-      }
+      const target = e.target as Node
+      const dentroBtn  = btnRef.current?.contains(target)  ?? false
+      const dentroMenu = menuRef.current?.contains(target) ?? false
+      if (!dentroBtn && !dentroMenu) setAbierto(false)
     }
+    // mousedown para escritorio, touchstart para móvil
     document.addEventListener('mousedown', handler)
-    document.addEventListener('touchstart', handler)
+    document.addEventListener('touchstart', handler, { passive: true })
     return () => {
       document.removeEventListener('mousedown', handler)
       document.removeEventListener('touchstart', handler)
@@ -1064,6 +1066,11 @@ function SelectorEjercicio({
     { label: 'Día 3', items: ejercicios.filter((e) => e.dia === 3) },
     { label: 'Otros',  items: ejercicios.filter((e) => e.dia !== 1 && e.dia !== 2 && e.dia !== 3) },
   ] as const).filter((g) => g.items.length > 0)
+
+  // Altura máxima del menú: desde el borde inferior del botón hasta el 90% de la pantalla
+  const maxMenuH = menuRect
+    ? Math.min(288, window.innerHeight * 0.9 - menuRect.top)
+    : 288
 
   return (
     <div className="px-4 pb-3">
@@ -1082,13 +1089,21 @@ function SelectorEjercicio({
         }
       </button>
 
-      {/* Menú — position:fixed para escapar de cualquier overflow:hidden padre */}
+      {/* Menú — position:fixed para escapar de overflow:hidden padres */}
       {abierto && menuRect && (
         <div
+          ref={menuRef}
           style={{ position: 'fixed', top: menuRect.top, left: menuRect.left, width: menuRect.width, zIndex: 9999 }}
           className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
         >
-          <div className="max-h-72 overflow-y-auto overscroll-contain">
+          <div
+            style={{
+              maxHeight: maxMenuH,
+              overflowY: 'auto',
+              overscrollBehavior: 'contain',
+              WebkitOverflowScrolling: 'touch',
+            } as React.CSSProperties}
+          >
             {grupos.map((grupo) => (
               <div key={grupo.label}>
                 <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 bg-zinc-950/70 sticky top-0">
