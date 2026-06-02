@@ -1319,18 +1319,26 @@ function isAsistencia(nombre: string): boolean {
 interface ProgresoEjercicio {
   nombre: string
   volActual: number
-  /** Diferencia vs sesión anterior. null = sin datos. 0 = igual (se omite). */
+  /**
+   * Diferencia vs sesión anterior.
+   * null = sin sesión anterior.
+   * 0 = mismo volumen exacto.
+   * Siempre se muestra cuando hay datos (incluso si es 0).
+   */
   diffAnterior: number | null
-  /** Diferencia vs media de 4. null = sin datos. 0 = igual (se omite). */
-  diffMedia4:   number | null
+  /**
+   * Diferencia vs media de las últimas 4 sesiones.
+   * null = sin sesiones anteriores.
+   */
+  diffMedia4: number | null
   esAsistencia: boolean
 }
 
 /**
  * Para cada ejercicio completado, calcula el volumen y lo compara con
  * (a) la sesión anterior y (b) la media de las últimas 4.
- * Devuelve solo los ejercicios con al menos un cambio (subida o bajada).
- * Ejercicios iguales o sin historial se omiten.
+ * Devuelve solo ejercicios donde al menos una comparación tiene cambio real.
+ * Cuando el ejercicio aparece, SIEMPRE se incluyen AMBAS comparaciones con datos.
  */
 function calcularProgresosVolumen(
   completados: SesionEjercicio[],
@@ -1362,12 +1370,17 @@ function calcularProgresosVolumen(
     const media4      = volPrevios.reduce((a, b) => a + b, 0) / volPrevios.length
     const rawMedia4   = volActual - media4
 
-    // Solo incluir si al menos una comparación tiene cambio real
-    const diffAnterior = Math.abs(rawAnterior) > 0.01 ? rawAnterior : null
-    const diffMedia4   = Math.abs(rawMedia4)   > 0.01 ? rawMedia4   : null
-    if (diffAnterior === null && diffMedia4 === null) continue
+    // Omitir solo si AMBAS comparaciones son idénticas (sin ningún cambio)
+    if (Math.abs(rawAnterior) < 0.01 && Math.abs(rawMedia4) < 0.01) continue
 
-    resultado.push({ nombre, volActual, diffAnterior, diffMedia4, esAsistencia: isAsistencia(nombre) })
+    // Almacenar siempre ambos valores — null solo si no hay datos históricos
+    resultado.push({
+      nombre,
+      volActual,
+      diffAnterior: rawAnterior,   // siempre presente (puede ser 0)
+      diffMedia4:   rawMedia4,     // siempre presente (puede ser 0)
+      esAsistencia: isAsistencia(nombre),
+    })
   }
   return resultado
 }
@@ -1438,14 +1451,9 @@ function generarTextoWhatsApp(
     lines.push('📈 Progreso de hoy')
     for (const p of progresos) {
       lines.push(`${p.nombre} (${fmtKg(p.volActual)} kg vol.)`)
-      if (p.diffAnterior !== null) {
-        const { texto } = lineaProgreso(p.diffAnterior, p.esAsistencia, 'anterior')
-        lines.push(`  ${texto}`)
-      }
-      if (p.diffMedia4 !== null) {
-        const { texto } = lineaProgreso(p.diffMedia4, p.esAsistencia, 'media4')
-        lines.push(`  ${texto}`)
-      }
+      // Siempre mostrar ambas líneas cuando hay datos
+      lines.push(`  ${lineaProgreso(p.diffAnterior ?? 0, p.esAsistencia, 'anterior').texto}`)
+      lines.push(`  ${lineaProgreso(p.diffMedia4   ?? 0, p.esAsistencia, 'media4').texto}`)
     }
   }
 
@@ -1454,38 +1462,46 @@ function generarTextoWhatsApp(
 
 // ── SeccionProgresoHoy ────────────────────────────────────────────────────────
 
-/** Para una línea de progreso: determina si es mejora, texto y color. */
+/** Para una línea de progreso: determina si es mejora, texto y clase de color. */
 function lineaProgreso(
   diff: number,
   esAsistencia: boolean,
   tipo: 'anterior' | 'media4',
-): { mejoró: boolean; texto: string } {
+): { mejoró: boolean; texto: string; colorClass: string } {
   const label = tipo === 'anterior' ? 'vs sesión anterior' : 'vs media 4 sesiones'
-  const abs = Math.abs(diff)
-  if (esAsistencia) {
-    // Bajar asistencia = mejorar
-    const mejoró = diff < 0
-    const texto = mejoró
-      ? `↓ -${fmtKg(abs)} kg de asistencia ${label} (menos ayuda 💪)`
-      : `↑ +${fmtKg(abs)} kg de asistencia ${label}`
-    return { mejoró, texto }
+  const abs   = Math.abs(diff)
+
+  // Caso "igual" (≤ 0.01 kg de diferencia)
+  if (abs < 0.01) {
+    return { mejoró: false, colorClass: 'text-zinc-500', texto: `= mismo volumen ${label}` }
   }
+
+  if (esAsistencia) {
+    const mejoró = diff < 0
+    return {
+      mejoró,
+      colorClass: mejoró ? 'text-emerald-400' : 'text-red-400',
+      texto: mejoró
+        ? `↓ -${fmtKg(abs)} kg de asistencia ${label} (menos ayuda 💪)`
+        : `↑ +${fmtKg(abs)} kg de asistencia ${label}`,
+    }
+  }
+
   const mejoró = diff > 0
-  const texto = mejoró
-    ? `↑ +${fmtKg(abs)} kg ${label}`
-    : `↓ -${fmtKg(abs)} kg ${label}`
-  return { mejoró, texto }
+  return {
+    mejoró,
+    colorClass: mejoró ? 'text-emerald-400' : 'text-red-400',
+    texto: mejoró ? `↑ +${fmtKg(abs)} kg ${label}` : `↓ -${fmtKg(abs)} kg ${label}`,
+  }
 }
 
 function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
   if (progresos.length === 0) return null
 
-  // Hay "¡Buen trabajo!" solo si al menos una línea es una mejora real
-  const hayMejora = progresos.some((p) => {
-    if (p.diffAnterior !== null && lineaProgreso(p.diffAnterior, p.esAsistencia, 'anterior').mejoró) return true
-    if (p.diffMedia4   !== null && lineaProgreso(p.diffMedia4,   p.esAsistencia, 'media4').mejoró)  return true
-    return false
-  })
+  const hayMejora = progresos.some((p) =>
+    (p.diffAnterior !== null && lineaProgreso(p.diffAnterior, p.esAsistencia, 'anterior').mejoró) ||
+    (p.diffMedia4   !== null && lineaProgreso(p.diffMedia4,   p.esAsistencia, 'media4').mejoró),
+  )
 
   return (
     <div className="bg-zinc-900 border border-zinc-700 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300 mb-4">
@@ -1495,24 +1511,21 @@ function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
       </div>
       <div className="divide-y divide-zinc-800/60">
         {progresos.map((p, i) => {
-          const linAnterior = p.diffAnterior !== null ? lineaProgreso(p.diffAnterior, p.esAsistencia, 'anterior') : null
-          const linMedia4   = p.diffMedia4   !== null ? lineaProgreso(p.diffMedia4,   p.esAsistencia, 'media4')   : null
+          // Ambas líneas siempre presentes cuando hay datos históricos
+          const linAnterior = lineaProgreso(p.diffAnterior ?? 0, p.esAsistencia, 'anterior')
+          const linMedia4   = lineaProgreso(p.diffMedia4   ?? 0, p.esAsistencia, 'media4')
           return (
             <div key={i} className="px-4 py-3 flex flex-col gap-1">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-bold text-white leading-snug">{p.nombre}</span>
                 <span className="text-xs text-zinc-500 tabular-nums shrink-0">{fmtKg(p.volActual)} kg vol.</span>
               </div>
-              {linAnterior && (
-                <span className={`text-xs font-semibold ${linAnterior.mejoró ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {linAnterior.texto}
-                </span>
-              )}
-              {linMedia4 && (
-                <span className={`text-xs font-semibold ${linMedia4.mejoró ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {linMedia4.texto}
-                </span>
-              )}
+              <span className={`text-xs font-semibold ${linAnterior.colorClass}`}>
+                {linAnterior.texto}
+              </span>
+              <span className={`text-xs font-semibold ${linMedia4.colorClass}`}>
+                {linMedia4.texto}
+              </span>
             </div>
           )
         })}

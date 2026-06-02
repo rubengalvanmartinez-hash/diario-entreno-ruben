@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.3'
+export const APP_VERSION = '1.9.4'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.4',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: diffAnterior se ponía null cuando el volumen era igual al anterior — solo aparecía media4',
+      'Fix: calcularProgresosVolumen almacena SIEMPRE ambos diffs (null solo si sin historial)',
+      'Ejercicio se omite solo si AMBAS comparaciones son iguales (< 0.01 kg)',
+      'lineaProgreso maneja diff ≈ 0: "= mismo volumen" en zinc (neutral)',
+      'SeccionProgresoHoy siempre muestra las dos líneas cuando hay datos históricos',
+    ],
+  },
   {
     version: '1.9.3',
     fecha: '02/06/2026',
