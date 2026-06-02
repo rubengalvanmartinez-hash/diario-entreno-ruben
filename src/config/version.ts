@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.6'
+export const APP_VERSION = '1.9.7'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.7',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Diagnóstico completo en calcularProgresosVolumen: log inicial con nº ejercicios e historial',
+      'Log por ejercicio: volActual, sesiones previas encontradas, volúmenes históricos',
+      'Log explícito de cada descarte con el motivo (volActual≤0 / sin historial / diffs≈0)',
+      'Log final con lista de ejercicios incluidos en "Progreso de hoy"',
+    ],
+  },
   {
     version: '1.9.6',
     fecha: '02/06/2026',

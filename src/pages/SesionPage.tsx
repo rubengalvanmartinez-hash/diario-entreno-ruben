@@ -1415,11 +1415,28 @@ function calcularProgresosVolumen(
   historialOrdenado: Sesion[],
   sesionActualId: string,
 ): ProgresoEjercicio[] {
+  // ── LOG INICIAL ──────────────────────────────────────────────────────────
+  console.log(
+    `[calcularProgresosVolumen] INICIO`,
+    `| completados: ${completados.length}`,
+    `| historial: ${historialOrdenado.length} sesiones`,
+    `| sesionActualId: ${sesionActualId}`,
+  )
+  console.log(
+    `[calcularProgresosVolumen] Ejercicios en sesión:`,
+    completados.map((e) => `"${e.nombreSustituido ?? e.nombreSnapshot}" completado=${e.completado} saltado=${e.saltado}`),
+  )
+
   const resultado: ProgresoEjercicio[] = []
   for (const ej of completados) {
     const volActual = calcularVolumen(ej.series)
-    if (volActual <= 0) continue
     const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
+
+    // Filtro 1: volumen actual debe ser > 0
+    if (volActual <= 0) {
+      console.log(`[calcularProgresosVolumen] DESCARTADO "${nombre}" — volActual=${volActual} (≤ 0)`)
+      continue
+    }
 
     // Hasta 4 sesiones previas con volumen > 0 — excluir la sesión actual
     const volPrevios: number[] = []
@@ -1436,18 +1453,36 @@ function calcularProgresosVolumen(
         if (volPrevios.length >= 4) break
       }
     }
-    if (volPrevios.length === 0) continue
+
+    // LOG por ejercicio: historial encontrado
+    console.log(
+      `[calcularProgresosVolumen] "${nombre}"`,
+      `| volActual: ${volActual}`,
+      `| sesiones previas encontradas: ${volPrevios.length}`,
+      volPrevios.length > 0 ? `| vols previos: [${volPrevios.map((v) => v.toFixed(1)).join(', ')}]` : '| SIN HISTORIAL',
+    )
+
+    // Filtro 2: necesita al menos una sesión previa
+    if (volPrevios.length === 0) {
+      console.log(`[calcularProgresosVolumen] DESCARTADO "${nombre}" — sin sesiones previas con ese ejercicio`)
+      continue
+    }
 
     const rawAnterior = volActual - volPrevios[0]
     const media4      = volPrevios.reduce((a, b) => a + b, 0) / volPrevios.length
     const rawMedia4   = volActual - media4
 
-    // Omitir solo si AMBAS comparaciones son idénticas (sin ningún cambio)
-    if (Math.abs(rawAnterior) < 0.01 && Math.abs(rawMedia4) < 0.01) continue
+    // Filtro 3: omitir si ambas diferencias son ≈ 0
+    if (Math.abs(rawAnterior) < 0.01 && Math.abs(rawMedia4) < 0.01) {
+      console.log(`[calcularProgresosVolumen] DESCARTADO "${nombre}" — ambas diffs ≈ 0 (sin cambio de volumen)`)
+      continue
+    }
 
     const esAsist = isAsistencia(nombre)
     console.log(
-      `[Progreso] "${nombre}" | esAsistencia: ${esAsist} | normNombre: "${normNombre(nombre)}"`,
+      `[calcularProgresosVolumen] INCLUIDO "${nombre}"`,
+      `| normNombre: "${normNombre(nombre)}"`,
+      `| esAsistencia: ${esAsist}`,
       `| diffAnterior: ${rawAnterior.toFixed(2)} | diffMedia4: ${rawMedia4.toFixed(2)}`,
     )
 
@@ -1460,6 +1495,11 @@ function calcularProgresosVolumen(
       esAsistencia: esAsist,
     })
   }
+
+  console.log(
+    `[calcularProgresosVolumen] RESULTADO FINAL: ${resultado.length} ejercicios incluidos:`,
+    resultado.map((r) => r.nombre),
+  )
   return resultado
 }
 
