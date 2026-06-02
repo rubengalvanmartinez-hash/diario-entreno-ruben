@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.3'
+export const APP_VERSION = '1.8.4'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.8.4',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: count siempre era null — .update().select() devuelve data[], no count',
+      'SELECT previo lanza error explícito si 0 filas: muestra sesion_id+ejercicio+serie exactos',
+      'Si SELECT falla, consulta adicional mostrando todas las filas de esa sesión (para comparar nombres)',
+      'UPDATE: ahora usa data?.length para contar filas afectadas, no count',
+      'UPDATE con 0 filas lanza "probable bloqueo por RLS" — ya visible en toast del iPhone',
+    ],
+  },
   {
     version: '1.8.3',
     fecha: '02/06/2026',

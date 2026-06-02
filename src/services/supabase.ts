@@ -699,7 +699,8 @@ export async function cargarPerfilCorporal(
  * Actualiza el valor de reps o peso_kg de una serie en el historial.
  * La clave compuesta (usuario_id, sesion_id, ejercicio, serie) identifica la fila.
  *
- * v1.8.2 — diagnóstico: imprime parámetros y error completo de Supabase.
+ * v1.8.4 — diagnóstico completo: SELECT previo, comprobación de 0 filas,
+ * error explícito si RLS bloquea o WHERE no coincide.
  */
 export async function actualizarSerieSupabase(
   usuarioId: string,
@@ -709,57 +710,82 @@ export async function actualizarSerieSupabase(
   campo: 'reps' | 'peso_kg',
   valor: number,
 ): Promise<void> {
-  const serieInt = Math.round(serieNum) // asegurar entero (evitar float 1.0 vs 1)
+  const serieInt = Math.round(serieNum)
 
-  // ── 1. Verificar qué filas existen con estos criterios ──────────────────────
-  const { data: filas, error: errSelect } = await supabase
+  console.log('[actualizarSerie] ── INICIO ──────────────────────────────')
+  console.log('[actualizarSerie] usuarioId  :', usuarioId)
+  console.log('[actualizarSerie] sesionId   :', sesionId)
+  console.log('[actualizarSerie] ejercicio  :', JSON.stringify(ejercicioNombre))
+  console.log('[actualizarSerie] serieInt   :', serieInt, '(original:', serieNum, ')')
+  console.log('[actualizarSerie] campo      :', campo)
+  console.log('[actualizarSerie] valor nuevo:', valor)
+
+  // ── 1. SELECT diagnóstico: ¿existe la fila con estos criterios? ─────────────
+  const { data: filasSelect, error: errSelect } = await supabase
     .from('entrenos')
-    .select('id, usuario_id, sesion_id, ejercicio, serie, reps, peso_kg')
+    .select('usuario_id, sesion_id, ejercicio, serie, reps, peso_kg')
     .eq('usuario_id', usuarioId)
     .eq('sesion_id', sesionId)
     .eq('ejercicio', ejercicioNombre)
     .eq('serie', serieInt)
 
-  console.log('[actualizarSerie] Params:', {
-    usuarioId,
-    sesionId,
-    ejercicioNombre,
-    serieInt,
-    campo,
-    valor,
-  })
-  console.log('[actualizarSerie] Filas encontradas con SELECT:', filas?.length ?? 0, filas)
   if (errSelect) {
-    console.error('[actualizarSerie] Error en SELECT diagnóstico:', errSelect)
+    console.error('[actualizarSerie] Error en SELECT:', errSelect)
+    throw new Error(`SELECT falló: ${errSelect.message}`)
   }
 
-  // ── 2. Ejecutar el UPDATE ───────────────────────────────────────────────────
-  const { error, count } = await supabase
+  const nFilas = filasSelect?.length ?? 0
+  console.log('[actualizarSerie] SELECT — filas encontradas:', nFilas)
+  if (nFilas > 0) {
+    console.log('[actualizarSerie] SELECT — primera fila encontrada:', filasSelect![0])
+  } else {
+    // Sin coincidencia: diagnóstico ampliado — buscar por sesion_id solo para ver qué hay
+    const { data: sesionRows } = await supabase
+      .from('entrenos')
+      .select('ejercicio, serie, reps, peso_kg')
+      .eq('usuario_id', usuarioId)
+      .eq('sesion_id', sesionId)
+    console.warn('[actualizarSerie] 0 filas con ese ejercicio+serie. Todas las filas de esa sesión:', sesionRows)
+  }
+
+  if (nFilas === 0) {
+    const detalle = `0 filas encontradas — sesion_id="${sesionId}" ejercicio="${ejercicioNombre}" serie=${serieInt}`
+    console.error('[actualizarSerie]', detalle)
+    throw new Error(detalle)
+  }
+
+  // ── 2. UPDATE ────────────────────────────────────────────────────────────────
+  const { data: filasUpdate, error: errUpdate } = await supabase
     .from('entrenos')
     .update({ [campo]: valor })
     .eq('usuario_id', usuarioId)
     .eq('sesion_id', sesionId)
     .eq('ejercicio', ejercicioNombre)
     .eq('serie', serieInt)
-    .select() // necesario para recibir count en Supabase v2
+    .select('serie, reps, peso_kg')   // devuelve las filas actualizadas
 
-  if (error) {
-    console.error('[actualizarSerie] ERROR Supabase:', {
-      message: error.message,
-      details: (error as { details?: string }).details,
-      hint:    (error as { hint?: string }).hint,
-      code:    (error as { code?: string }).code,
+  if (errUpdate) {
+    console.error('[actualizarSerie] Error en UPDATE:', {
+      message: errUpdate.message,
+      details: (errUpdate as { details?: string }).details,
+      hint:    (errUpdate as { hint?: string }).hint,
+      code:    (errUpdate as { code?: string }).code,
     })
-    // Lanzar con mensaje legible para mostrarlo en pantalla
     throw new Error(
-      `[${(error as { code?: string }).code ?? '?'}] ${error.message}` +
-      ((error as { hint?: string }).hint ? ` — ${(error as { hint?: string }).hint}` : ''),
+      `[${(errUpdate as { code?: string }).code ?? '?'}] ${errUpdate.message}` +
+      ((errUpdate as { hint?: string }).hint ? ` — ${(errUpdate as { hint?: string }).hint}` : ''),
     )
   }
 
-  console.log('[actualizarSerie] UPDATE OK — filas afectadas:', count)
-  if (count === 0) {
-    // No es error de Supabase, pero tampoco actualizó nada — la fila no existía
-    console.warn('[actualizarSerie] 0 filas actualizadas. Puede que la fila no exista en Supabase.')
+  const nActualizadas = filasUpdate?.length ?? 0
+  console.log('[actualizarSerie] UPDATE — filas actualizadas:', nActualizadas, filasUpdate)
+
+  if (nActualizadas === 0) {
+    // Supabase no devolvió error pero tampoco actualizó — casi siempre es RLS sin política UPDATE
+    const detalle = `UPDATE afectó 0 filas — probable bloqueo por RLS (falta política UPDATE en tabla entrenos)`
+    console.error('[actualizarSerie]', detalle)
+    throw new Error(detalle)
   }
+
+  console.log('[actualizarSerie] ── OK ─────────────────────────────────')
 }
