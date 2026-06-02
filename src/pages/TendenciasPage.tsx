@@ -1026,15 +1026,28 @@ function SelectorEjercicio({
   onSeleccionar: (id: string) => void
 }) {
   const [abierto, setAbierto] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  // Posición fija del menú — se recalcula en cada apertura
+  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
 
   const seleccionadoObj = ejercicios.find((e) => e.id === seleccionado) ?? null
 
-  // Cerrar al tocar fuera del dropdown
+  const handleToggle = () => {
+    console.log('[SelectorEjercicio] click — abierto actual:', abierto)
+    if (!abierto && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setMenuRect({ top: r.bottom + 6, left: r.left, width: r.width })
+    }
+    setAbierto((v) => !v)
+  }
+
+  // Cerrar al tocar fuera
   useEffect(() => {
     if (!abierto) return
     const handler = (e: MouseEvent | TouchEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setAbierto(false)
+      if (btnRef.current && !btnRef.current.contains(e.target as Node)) {
+        setAbierto(false)
+      }
     }
     document.addEventListener('mousedown', handler)
     document.addEventListener('touchstart', handler)
@@ -1053,10 +1066,11 @@ function SelectorEjercicio({
   ] as const).filter((g) => g.items.length > 0)
 
   return (
-    <div ref={ref} className="relative px-4 pb-3">
-      {/* Botón selector cerrado */}
+    <div className="px-4 pb-3">
+      {/* Botón selector */}
       <button
-        onClick={() => setAbierto((v) => !v)}
+        ref={btnRef}
+        onClick={handleToggle}
         className="w-full flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-3.5 text-left active:bg-zinc-800 transition-colors"
       >
         <span className="flex-1 text-sm font-semibold text-white truncate">
@@ -1068,9 +1082,12 @@ function SelectorEjercicio({
         }
       </button>
 
-      {/* Menú desplegable */}
-      {abierto && (
-        <div className="absolute left-4 right-4 top-full mt-1.5 z-30 bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden">
+      {/* Menú — position:fixed para escapar de cualquier overflow:hidden padre */}
+      {abierto && menuRect && (
+        <div
+          style={{ position: 'fixed', top: menuRect.top, left: menuRect.left, width: menuRect.width, zIndex: 9999 }}
+          className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
+        >
           <div className="max-h-72 overflow-y-auto overscroll-contain">
             {grupos.map((grupo) => (
               <div key={grupo.label}>

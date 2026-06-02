@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.0.0'
+export const APP_VERSION = '2.0.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,16 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.0.1',
+    fecha: '03/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: dropdown de ejercicios no se abría — * { overflow-x: hidden } en index.html cortaba el menú absoluto',
+      'Fix: menú renderizado con position:fixed + getBoundingClientRect — escapa de cualquier overflow padre',
+      'console.log al hacer clic para confirmar que el evento se dispara',
+    ],
+  },
   {
     version: '2.0.0',
     fecha: '02/06/2026',
