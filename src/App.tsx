@@ -9,7 +9,23 @@ import TendenciasPage      from './pages/TendenciasPage'
 import LoginPage           from './pages/LoginPage'
 import AdminUsuariosPage   from './pages/AdminUsuariosPage'
 import DebugSupabasePage   from './pages/DebugSupabasePage'
-import { getUsuarioActivo } from './services/supabase'
+import { getUsuarioActivo, RUBEN_UUID } from './services/supabase'
+
+// ---------------------------------------------------------------------------
+// CORRECCIÓN UUID RUBÉN — corre antes de cualquier hidratación del store.
+// Garantiza que localStorage['fitlog-ruben-uuid'] es siempre RUBEN_UUID,
+// independientemente de lo que el SW cacheado haya podido escribir antes.
+// ---------------------------------------------------------------------------
+
+;(function corregirUUIDRuben() {
+  try {
+    const stored = localStorage.getItem('fitlog-ruben-uuid')
+    if (stored !== RUBEN_UUID) {
+      localStorage.setItem('fitlog-ruben-uuid', RUBEN_UUID)
+      console.warn('[UUID] fitlog-ruben-uuid corregido:', stored, '→', RUBEN_UUID)
+    }
+  } catch { /* localStorage no disponible — ignorar */ }
+})()
 
 // ---------------------------------------------------------------------------
 // RESCATE DE DATOS DE RUBÉN

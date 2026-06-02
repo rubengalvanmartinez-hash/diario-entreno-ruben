@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7.1'
+export const APP_VERSION = '1.7.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,16 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.7.2',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: UUID "02200009" creado porque localStorage tenía un UUID antiguo del iPhone',
+      'IIFE en App.tsx: corrige fitlog-ruben-uuid a RUBEN_UUID en el arranque, antes de cualquier React',
+      'Defensa en profundidad: aunque el SW sirva JS cacheado de v1.7.0, el UUID se corrige al montar la app',
+    ],
+  },
   {
     version: '1.7.1',
     fecha: '02/06/2026',
