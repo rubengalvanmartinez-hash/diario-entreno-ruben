@@ -94,17 +94,23 @@ function lanzarObjetivoCelebration() {
   }
 }
 
-/** Helper para colorear campo de peso según máximo histórico (S1) o serie anterior (S2+) */
+/** Helper para colorear campo de peso según máximo histórico (S1) o serie anterior (S2+).
+ *  Para ejercicios de asistencia (esAsistencia=true) la lógica se invierte:
+ *  peso menor = 'superado' (menos ayuda = mejora), peso mayor = 'bajo'. */
 type PesoColor = 'superado' | 'bajo' | 'neutro'
 function getPesoColor(
   i: number,
   pesosRaw: string[],
   ultimoEntreno: { series: { pesoKg: number | string }[] } | null,
+  esAsistencia = false,
 ): PesoColor {
   const rawStr = pesosRaw[i] ?? ''
   if (rawStr.trim() === '') return 'neutro'
   const num = parseFloat(rawStr.replace(',', '.'))
   if (isNaN(num) || num <= 0) return 'neutro'
+
+  const mejor  = (a: number, ref: number) => esAsistencia ? a < ref : a > ref
+  const peor   = (a: number, ref: number) => esAsistencia ? a > ref : a < ref
 
   if (i === 0) {
     // Serie 1: comparar vs máximo peso del último entreno histórico
@@ -114,8 +120,8 @@ function getPesoColor(
       .filter((v) => v > 0 && isFinite(v))
     if (vals.length === 0) return 'neutro'
     const maxPrevio = Math.max(...vals)
-    if (num > maxPrevio) return 'superado'
-    if (num < maxPrevio) return 'bajo'
+    if (mejor(num, maxPrevio)) return 'superado'
+    if (peor(num, maxPrevio))  return 'bajo'
     return 'neutro'
   }
 
@@ -124,8 +130,8 @@ function getPesoColor(
   if (prevRaw.trim() === '') return 'neutro'
   const prevNum = parseFloat(prevRaw.replace(',', '.'))
   if (isNaN(prevNum) || prevNum <= 0) return 'neutro'
-  if (num > prevNum) return 'superado'
-  if (num < prevNum) return 'bajo'
+  if (mejor(num, prevNum)) return 'superado'
+  if (peor(num, prevNum))  return 'bajo'
   return 'neutro'
 }
 
@@ -693,7 +699,7 @@ function EjercicioCard({
 
         {/* Filas */}
         {series.map((serie, i) => {
-          const pesoColor = getPesoColor(i, pesosRaw, ultimoEntreno)
+          const pesoColor = getPesoColor(i, pesosRaw, ultimoEntreno, isAsistencia(nombre))
           const pesoBgStyle: React.CSSProperties =
             pesoColor === 'superado'
               ? { background: 'linear-gradient(135deg, rgba(6,78,59,0.55) 0%, rgba(39,39,42,0.9) 100%)' }

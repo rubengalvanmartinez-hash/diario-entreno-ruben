@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.7'
+export const APP_VERSION = '1.9.8'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.8',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Campos de peso en sesión activa: lógica invertida para ejercicios de asistencia (Dominadas)',
+      'getPesoColor: parámetro esAsistencia — verde si baja (menos ayuda), rojo si sube',
+      'Aplica a S1 (vs máximo último entreno) y S2+ (vs serie anterior)',
+      'Coherente con el resumen final y "Progreso de hoy" ya corregidos en v1.9.7',
+    ],
+  },
   {
     version: '1.9.7',
     fecha: '02/06/2026',
