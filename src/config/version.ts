@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.6.0'
+export const APP_VERSION = '1.6.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,14 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.6.1',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Deploy automático con GitHub configurado',
+    ],
+  },
   {
     version: '1.6.0',
     fecha: '02/06/2026',
