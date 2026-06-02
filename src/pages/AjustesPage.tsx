@@ -125,6 +125,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // ── SeccionDia ────────────────────────────────────────────────────────────────
 
 function SeccionDia({ dia }: { dia: DiaId }) {
+  const [abierto, setAbierto] = useState(false)
+
   const ejercicios = useFitLogStore(
     useShallow((s) =>
       s.ejercicios.filter((e) => e.dia === dia).sort((a, b) => a.orden - b.orden),
@@ -155,40 +157,50 @@ function SeccionDia({ dia }: { dia: DiaId }) {
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Day header */}
-      <div className="flex items-center gap-2 px-1 mb-1">
+    <div className="rounded-2xl border border-zinc-800 overflow-hidden">
+      {/* Cabecera plegable */}
+      <button
+        onClick={() => setAbierto((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3.5 bg-zinc-900 active:bg-zinc-800/80 transition-colors"
+      >
         <span className="size-6 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
           <span className="text-xs font-black text-blue-400">{dia}</span>
         </span>
-        <h3 className="font-bold text-white">{DIA_NOMBRE[dia]}</h3>
-        <span className="text-xs text-zinc-600">
+        <span className="font-bold text-white flex-1 text-left">{DIA_NOMBRE[dia]}</span>
+        <span className="text-xs text-zinc-500">
           {ejercicios.length} ejercicio{ejercicios.length !== 1 ? 's' : ''}
         </span>
-      </div>
-
-      {/* Exercise cards */}
-      {ejercicios.map((ej, idx) => (
-        <EjercicioCard
-          key={ej.id}
-          ejercicio={ej}
-          isFirst={idx === 0}
-          isLast={idx === ejercicios.length - 1}
-          onMoverArriba={() => handleMover(ej.id, 'arriba')}
-          onMoverAbajo={() => handleMover(ej.id, 'abajo')}
-          onEliminar={() => eliminarEjercicio(ej.id)}
-        />
-      ))}
-
-      {/* Add button */}
-      <button
-        onClick={handleAgregar}
-        className="mt-1 flex items-center justify-center gap-2 rounded-2xl border border-dashed
-                   border-zinc-700 py-3.5 text-sm font-semibold text-zinc-500 active:bg-zinc-900/60"
-      >
-        <Plus size={17} />
-        Añadir ejercicio
+        {abierto
+          ? <ChevronUp size={16} className="text-zinc-400 shrink-0" />
+          : <ChevronDown size={16} className="text-zinc-400 shrink-0" />
+        }
       </button>
+
+      {/* Contenido desplegable */}
+      {abierto && (
+        <div className="flex flex-col gap-2 px-3 pt-3 pb-3 border-t border-zinc-800 bg-zinc-950/40">
+          {ejercicios.map((ej, idx) => (
+            <EjercicioCard
+              key={ej.id}
+              ejercicio={ej}
+              isFirst={idx === 0}
+              isLast={idx === ejercicios.length - 1}
+              onMoverArriba={() => handleMover(ej.id, 'arriba')}
+              onMoverAbajo={() => handleMover(ej.id, 'abajo')}
+              onEliminar={() => eliminarEjercicio(ej.id)}
+            />
+          ))}
+
+          <button
+            onClick={handleAgregar}
+            className="mt-1 flex items-center justify-center gap-2 rounded-2xl border border-dashed
+                       border-zinc-700 py-3.5 text-sm font-semibold text-zinc-500 active:bg-zinc-900/60"
+          >
+            <Plus size={17} />
+            Añadir ejercicio
+          </button>
+        </div>
+      )}
     </div>
   )
 }

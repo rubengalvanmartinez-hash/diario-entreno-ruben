@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.8'
+export const APP_VERSION = '1.9.9'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.9',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Ajustes: sección de ejercicios convertida en acordeón plegable por día',
+      'Los 3 días empiezan PLEGADOS — solo se ven las cabeceras (compacto)',
+      'Cabecera muestra: número de día, nombre, nº de ejercicios y chevron',
+      'Cada día se despliega/pliega independientemente al tocar su cabecera',
+      'Contenido desplegado mantiene todas las opciones: editar, mover, imagen, notas, añadir',
+    ],
+  },
   {
     version: '1.9.8',
     fecha: '02/06/2026',
