@@ -19,6 +19,11 @@ export interface Ejercicio {
   imagenBase64?: string
   /** Orden de aparición dentro del día */
   orden: number
+  /**
+   * true si el "peso" registrado es una ASISTENCIA (p.ej. Dominadas asistidas).
+   * En estos ejercicios bajar el volumen es progresar (menos ayuda = más fuerza).
+   */
+  esAsistencia?: boolean
 }
 
 // ---------------------------------------------------------------------------

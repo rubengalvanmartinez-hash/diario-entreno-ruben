@@ -1304,17 +1304,33 @@ function calcularVolumen(series: Serie[]): number {
   }, 0)
 }
 
+// Ejercicios de asistencia: bajar volumen = mejorar (menos ayuda = más fuerza)
+// Comparación normalizada (sin tildes, sin mayúsculas)
+function normNombre(s: string): string {
+  return s.trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+const ASISTENCIA_NOMBRES = ['dominadas']
+function isAsistencia(nombre: string): boolean {
+  const n = normNombre(nombre)
+  return ASISTENCIA_NOMBRES.some((a) => n.includes(a))
+}
+
 interface ProgresoEjercicio {
   nombre: string
   volActual: number
-  diffAnterior: number | null  // solo si subió
-  diffMedia4:   number | null  // solo si subió
+  /** Diferencia vs sesión anterior. null = sin datos. 0 = igual (se omite). */
+  diffAnterior: number | null
+  /** Diferencia vs media de 4. null = sin datos. 0 = igual (se omite). */
+  diffMedia4:   number | null
+  esAsistencia: boolean
 }
 
 /**
- * Para cada ejercicio completado, calcula el volumen actual y lo compara con
- * (a) la sesión anterior del mismo ejercicio y (b) la media de las últimas 4.
- * Devuelve solo los ejercicios en los que hay al menos una subida.
+ * Para cada ejercicio completado, calcula el volumen y lo compara con
+ * (a) la sesión anterior y (b) la media de las últimas 4.
+ * Devuelve solo los ejercicios con al menos un cambio (subida o bajada).
+ * Ejercicios iguales o sin historial se omiten.
  */
 function calcularProgresosVolumen(
   completados: SesionEjercicio[],
@@ -1342,18 +1358,16 @@ function calcularProgresosVolumen(
     }
     if (volPrevios.length === 0) continue
 
-    const diffAnterior = volActual - volPrevios[0]
-    const media4       = volPrevios.reduce((a, b) => a + b, 0) / volPrevios.length
-    const diffMedia4   = volActual - media4
+    const rawAnterior = volActual - volPrevios[0]
+    const media4      = volPrevios.reduce((a, b) => a + b, 0) / volPrevios.length
+    const rawMedia4   = volActual - media4
 
-    if (diffAnterior > 0 || diffMedia4 > 0) {
-      resultado.push({
-        nombre,
-        volActual,
-        diffAnterior: diffAnterior > 0 ? diffAnterior : null,
-        diffMedia4:   diffMedia4   > 0 ? diffMedia4   : null,
-      })
-    }
+    // Solo incluir si al menos una comparación tiene cambio real
+    const diffAnterior = Math.abs(rawAnterior) > 0.01 ? rawAnterior : null
+    const diffMedia4   = Math.abs(rawMedia4)   > 0.01 ? rawMedia4   : null
+    if (diffAnterior === null && diffMedia4 === null) continue
+
+    resultado.push({ nombre, volActual, diffAnterior, diffMedia4, esAsistencia: isAsistencia(nombre) })
   }
   return resultado
 }
@@ -1418,14 +1432,20 @@ function generarTextoWhatsApp(
   )
   lines.push('💪 ¡Gran sesión!')
 
-  // Sección progreso de volumen (solo si hay subidas)
+  // Sección progreso de volumen (solo si hay cambios)
   if (progresos.length > 0) {
     lines.push('')
     lines.push('📈 Progreso de hoy')
     for (const p of progresos) {
       lines.push(`${p.nombre} (${fmtKg(p.volActual)} kg vol.)`)
-      if (p.diffAnterior !== null) lines.push(`  ↑ +${fmtKg(p.diffAnterior)} kg vs anterior`)
-      if (p.diffMedia4   !== null) lines.push(`  ↑ +${fmtKg(p.diffMedia4)} kg vs media 4 💪`)
+      if (p.diffAnterior !== null) {
+        const { texto } = lineaProgreso(p.diffAnterior, p.esAsistencia, 'anterior')
+        lines.push(`  ${texto}`)
+      }
+      if (p.diffMedia4 !== null) {
+        const { texto } = lineaProgreso(p.diffMedia4, p.esAsistencia, 'media4')
+        lines.push(`  ${texto}`)
+      }
     }
   }
 
@@ -1434,38 +1454,75 @@ function generarTextoWhatsApp(
 
 // ── SeccionProgresoHoy ────────────────────────────────────────────────────────
 
+/** Para una línea de progreso: determina si es mejora, texto y color. */
+function lineaProgreso(
+  diff: number,
+  esAsistencia: boolean,
+  tipo: 'anterior' | 'media4',
+): { mejoró: boolean; texto: string } {
+  const label = tipo === 'anterior' ? 'vs sesión anterior' : 'vs media 4 sesiones'
+  const abs = Math.abs(diff)
+  if (esAsistencia) {
+    // Bajar asistencia = mejorar
+    const mejoró = diff < 0
+    const texto = mejoró
+      ? `↓ -${fmtKg(abs)} kg de asistencia ${label} (menos ayuda 💪)`
+      : `↑ +${fmtKg(abs)} kg de asistencia ${label}`
+    return { mejoró, texto }
+  }
+  const mejoró = diff > 0
+  const texto = mejoró
+    ? `↑ +${fmtKg(abs)} kg ${label}`
+    : `↓ -${fmtKg(abs)} kg ${label}`
+  return { mejoró, texto }
+}
+
 function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
   if (progresos.length === 0) return null
+
+  // Hay "¡Buen trabajo!" solo si al menos una línea es una mejora real
+  const hayMejora = progresos.some((p) => {
+    if (p.diffAnterior !== null && lineaProgreso(p.diffAnterior, p.esAsistencia, 'anterior').mejoró) return true
+    if (p.diffMedia4   !== null && lineaProgreso(p.diffMedia4,   p.esAsistencia, 'media4').mejoró)  return true
+    return false
+  })
+
   return (
-    <div className="bg-zinc-900 border border-emerald-800/50 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div className="bg-zinc-900 border border-zinc-700 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300 mb-4">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
         <span className="text-base select-none">📈</span>
-        <h3 className="font-bold text-emerald-400 text-sm">Progreso de hoy</h3>
+        <h3 className="font-bold text-white text-sm">Progreso de hoy</h3>
       </div>
       <div className="divide-y divide-zinc-800/60">
-        {progresos.map((p, i) => (
-          <div key={i} className="px-4 py-3 flex flex-col gap-1">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm font-bold text-white leading-snug">{p.nombre}</span>
-              <span className="text-xs text-zinc-500 tabular-nums shrink-0">{fmtKg(p.volActual)} kg</span>
+        {progresos.map((p, i) => {
+          const linAnterior = p.diffAnterior !== null ? lineaProgreso(p.diffAnterior, p.esAsistencia, 'anterior') : null
+          const linMedia4   = p.diffMedia4   !== null ? lineaProgreso(p.diffMedia4,   p.esAsistencia, 'media4')   : null
+          return (
+            <div key={i} className="px-4 py-3 flex flex-col gap-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-bold text-white leading-snug">{p.nombre}</span>
+                <span className="text-xs text-zinc-500 tabular-nums shrink-0">{fmtKg(p.volActual)} kg vol.</span>
+              </div>
+              {linAnterior && (
+                <span className={`text-xs font-semibold ${linAnterior.mejoró ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {linAnterior.texto}
+                </span>
+              )}
+              {linMedia4 && (
+                <span className={`text-xs font-semibold ${linMedia4.mejoró ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {linMedia4.texto}
+                </span>
+              )}
             </div>
-            {p.diffAnterior !== null && (
-              <span className="text-xs font-semibold text-emerald-400">
-                ↑ +{fmtKg(p.diffAnterior)} kg vs sesión anterior
-              </span>
-            )}
-            {p.diffMedia4 !== null && (
-              <span className="text-xs font-semibold text-emerald-400">
-                ↑ +{fmtKg(p.diffMedia4)} kg vs media 4 sesiones
-              </span>
-            )}
-          </div>
-        ))}
-        <div className="px-4 py-2.5 flex items-center gap-1.5">
-          <span className="text-sm select-none">💪</span>
-          <span className="text-xs font-bold text-emerald-400">¡Buen trabajo!</span>
-        </div>
+          )
+        })}
       </div>
+      {hayMejora && (
+        <div className="px-4 py-4 border-t border-zinc-800 flex items-center gap-2 bg-emerald-950/30">
+          <span className="text-base select-none">💪</span>
+          <span className="text-sm font-bold text-emerald-400">¡Buen trabajo!</span>
+        </div>
+      )}
     </div>
   )
 }

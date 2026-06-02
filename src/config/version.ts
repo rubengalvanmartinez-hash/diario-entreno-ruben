@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.2'
+export const APP_VERSION = '1.9.3'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,21 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.3',
+    fecha: '02/06/2026',
+    tipo: 'media',
+    cambios: [
+      'Progreso de hoy: muestra subidas Y bajadas (verde subida, rojo bajada)',
+      'Ejercicios iguales omitidos; ejercicios sin historial previo omitidos',
+      'Lógica invertida para ejercicios de asistencia: bajar volumen → verde (menos ayuda)',
+      'Lista configurable ASISTENCIA_NOMBRES, por ahora incluye "Dominadas" (match normalizado)',
+      'Campo esAsistencia?: boolean añadido al modelo Ejercicio para uso futuro',
+      '¡Buen trabajo! solo aparece si hay al menos una línea de mejora real',
+      '¡Buen trabajo! movido a banda propia con fondo esmeralda y padding, ya no queda cortado',
+      'Texto WhatsApp usa la misma lógica de lineaProgreso',
+    ],
+  },
   {
     version: '1.9.2',
     fecha: '02/06/2026',
