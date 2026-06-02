@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.0'
+export const APP_VERSION = '1.8.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,22 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.8.1',
+    fecha: '02/06/2026',
+    tipo: 'media',
+    cambios: [
+      'PanelHistoricoSeries rediseñado como tabla compacta tipo Excel',
+      'Una fila por serie (solo series con datos); ordenado por fecha desc → serie asc',
+      'Fecha visible solo en la primera serie de cada día (estilo celdas combinadas)',
+      'Columnas: Fecha (90px) | S (36px) | Reps | Kg — sin desbordamiento en móvil',
+      'Filas alternas con fondo distinto, línea divisoria más gruesa entre días',
+      'Fila activa resaltada en azul al editar; Kg en negrita blanca',
+      'Header sticky con contador de series y mensaje de ayuda',
+      'Barra inferior solo visible cuando hay edición activa (menos ruido visual)',
+      'Series sin reps ni kg omitidas completamente de la tabla',
+    ],
+  },
   {
     version: '1.8.0',
     fecha: '02/06/2026',
