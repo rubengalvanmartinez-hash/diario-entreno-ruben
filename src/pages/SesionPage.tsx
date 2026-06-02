@@ -1273,6 +1273,70 @@ function fmtKg(kg: number): string {
   return kg % 1 === 0 ? String(kg) : kg.toFixed(1)
 }
 
+function calcularVolumen(series: Serie[]): number {
+  return series.reduce((sum, s) => {
+    if (s.pesoKg === '' || s.reps === '') return sum
+    const kg   = Number(s.pesoKg)
+    const reps = Number(s.reps)
+    if (!isFinite(kg) || !isFinite(reps) || kg <= 0 || reps <= 0) return sum
+    return sum + kg * reps
+  }, 0)
+}
+
+interface ProgresoEjercicio {
+  nombre: string
+  volActual: number
+  diffAnterior: number | null  // solo si subió
+  diffMedia4:   number | null  // solo si subió
+}
+
+/**
+ * Para cada ejercicio completado, calcula el volumen actual y lo compara con
+ * (a) la sesión anterior del mismo ejercicio y (b) la media de las últimas 4.
+ * Devuelve solo los ejercicios en los que hay al menos una subida.
+ */
+function calcularProgresosVolumen(
+  completados: SesionEjercicio[],
+  historialOrdenado: Sesion[],
+): ProgresoEjercicio[] {
+  const resultado: ProgresoEjercicio[] = []
+  for (const ej of completados) {
+    const volActual = calcularVolumen(ej.series)
+    if (volActual <= 0) continue
+    const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
+
+    // Hasta 4 sesiones previas con volumen > 0
+    const volPrevios: number[] = []
+    for (const ses of historialOrdenado) {
+      const ejPrev = ses.ejercicios.find(
+        (e) =>
+          (e.nombreSnapshot === ej.nombreSnapshot || e.ejercicioId === ej.ejercicioId) &&
+          e.completado && !e.saltado,
+      )
+      if (ejPrev) {
+        const v = calcularVolumen(ejPrev.series)
+        if (v > 0) volPrevios.push(v)
+        if (volPrevios.length >= 4) break
+      }
+    }
+    if (volPrevios.length === 0) continue
+
+    const diffAnterior = volActual - volPrevios[0]
+    const media4       = volPrevios.reduce((a, b) => a + b, 0) / volPrevios.length
+    const diffMedia4   = volActual - media4
+
+    if (diffAnterior > 0 || diffMedia4 > 0) {
+      resultado.push({
+        nombre,
+        volActual,
+        diffAnterior: diffAnterior > 0 ? diffAnterior : null,
+        diffMedia4:   diffMedia4   > 0 ? diffMedia4   : null,
+      })
+    }
+  }
+  return resultado
+}
+
 function pesoMax(series: Serie[]): number | null {
   const vals = series
     .filter((s) => s.pesoKg !== '' && Number(s.pesoKg) > 0)
@@ -1285,6 +1349,7 @@ function generarTextoWhatsApp(
   diaNombre: string,
   totales: ReturnType<typeof calcularTotales>,
   historialPrevio: Sesion[],
+  progresos: ProgresoEjercicio[],
 ): string {
   const fecha = formatFechaCorta(sesion.fecha)
   const historialOrdenado = [...historialPrevio].sort((a, b) => b.fecha.localeCompare(a.fecha))
@@ -1331,7 +1396,57 @@ function generarTextoWhatsApp(
     `${fmtKg(totales.totalKg)}kg levantados`,
   )
   lines.push('💪 ¡Gran sesión!')
+
+  // Sección progreso de volumen (solo si hay subidas)
+  if (progresos.length > 0) {
+    lines.push('')
+    lines.push('📈 Progreso de hoy')
+    for (const p of progresos) {
+      lines.push(`${p.nombre} (${fmtKg(p.volActual)} kg vol.)`)
+      if (p.diffAnterior !== null) lines.push(`  ↑ +${fmtKg(p.diffAnterior)} kg vs anterior`)
+      if (p.diffMedia4   !== null) lines.push(`  ↑ +${fmtKg(p.diffMedia4)} kg vs media 4 💪`)
+    }
+  }
+
   return lines.join('\n')
+}
+
+// ── SeccionProgresoHoy ────────────────────────────────────────────────────────
+
+function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
+  if (progresos.length === 0) return null
+  return (
+    <div className="bg-zinc-900 border border-emerald-800/50 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
+        <span className="text-base select-none">📈</span>
+        <h3 className="font-bold text-emerald-400 text-sm">Progreso de hoy</h3>
+      </div>
+      <div className="divide-y divide-zinc-800/60">
+        {progresos.map((p, i) => (
+          <div key={i} className="px-4 py-3 flex flex-col gap-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-sm font-bold text-white leading-snug">{p.nombre}</span>
+              <span className="text-xs text-zinc-500 tabular-nums shrink-0">{fmtKg(p.volActual)} kg</span>
+            </div>
+            {p.diffAnterior !== null && (
+              <span className="text-xs font-semibold text-emerald-400">
+                ↑ +{fmtKg(p.diffAnterior)} kg vs sesión anterior
+              </span>
+            )}
+            {p.diffMedia4 !== null && (
+              <span className="text-xs font-semibold text-emerald-400">
+                ↑ +{fmtKg(p.diffMedia4)} kg vs media 4 sesiones
+              </span>
+            )}
+          </div>
+        ))}
+        <div className="px-4 py-2.5 flex items-center gap-1.5">
+          <span className="text-sm select-none">💪</span>
+          <span className="text-xs font-bold text-emerald-400">¡Buen trabajo!</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ── ResumenSesion — componente ────────────────────────────────────────────────
@@ -1361,6 +1476,12 @@ function ResumenSesion({
     [historialPrevio],
   )
 
+  const progresos = useMemo(
+    () => calcularProgresosVolumen(completados, historialOrdenado),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sesion.id, historialPrevio],
+  )
+
   useEffect(() => {
     lanzarEmojis()
     if (hayObjetivoSuperado) {
@@ -1370,7 +1491,7 @@ function ResumenSesion({
   }, [])
 
   const handleCopiar = async () => {
-    const texto = generarTextoWhatsApp(sesion, diaNombre, totales, historialPrevio)
+    const texto = generarTextoWhatsApp(sesion, diaNombre, totales, historialPrevio, progresos)
     try {
       await navigator.clipboard.writeText(texto)
       setCopiado(true)
@@ -1440,7 +1561,7 @@ function ResumenSesion({
               )}
             </div>
 
-            {/* Tarjeta por ejercicio */}
+            {/* Tarjetas por ejercicio */}
             {completados.map((ej, ejIdx) => {
               const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
 
@@ -1546,6 +1667,9 @@ function ResumenSesion({
                 </div>
               )
             })}
+
+            {/* Sección progreso de volumen — al final, solo si hay subidas */}
+            <SeccionProgresoHoy progresos={progresos} />
           </>
         ) : (
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
@@ -1553,7 +1677,7 @@ function ResumenSesion({
               Vista previa
             </p>
             <pre className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap break-words font-mono">
-              {generarTextoWhatsApp(sesion, diaNombre, totales, historialPrevio)}
+              {generarTextoWhatsApp(sesion, diaNombre, totales, historialPrevio, progresos)}
             </pre>
           </div>
         )}

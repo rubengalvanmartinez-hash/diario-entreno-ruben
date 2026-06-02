@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.7'
+export const APP_VERSION = '1.9.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.0',
+    fecha: '02/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'Sección "📈 Progreso de hoy" al final del resumen de sesión (después de todas las tarjetas)',
+      'Solo aparece si algún ejercicio subió volumen respecto a sesión anterior o media de 4',
+      'Muestra: nombre, volumen actual, y línea verde por cada métrica que subió',
+      'Si ningún ejercicio subió, la sección no se muestra',
+      '💪 ¡Buen trabajo! al final de la sección cuando hay subidas',
+      'Texto WhatsApp incluye la misma sección al final con formato compacto',
+    ],
+  },
   {
     version: '1.8.7',
     fecha: '02/06/2026',
