@@ -1445,13 +1445,19 @@ function calcularProgresosVolumen(
     // Omitir solo si AMBAS comparaciones son idénticas (sin ningún cambio)
     if (Math.abs(rawAnterior) < 0.01 && Math.abs(rawMedia4) < 0.01) continue
 
+    const esAsist = isAsistencia(nombre)
+    console.log(
+      `[Progreso] "${nombre}" | esAsistencia: ${esAsist} | normNombre: "${normNombre(nombre)}"`,
+      `| diffAnterior: ${rawAnterior.toFixed(2)} | diffMedia4: ${rawMedia4.toFixed(2)}`,
+    )
+
     // Almacenar siempre ambos valores — null solo si no hay datos históricos
     resultado.push({
       nombre,
       volActual,
       diffAnterior: rawAnterior,   // siempre presente (puede ser 0)
       diffMedia4:   rawMedia4,     // siempre presente (puede ser 0)
-      esAsistencia: isAsistencia(nombre),
+      esAsistencia: esAsist,
     })
   }
   return resultado
@@ -1586,6 +1592,11 @@ function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
           // Ambas líneas siempre presentes cuando hay datos históricos
           const linAnterior = lineaProgreso(p.diffAnterior ?? 0, p.esAsistencia, 'anterior')
           const linMedia4   = lineaProgreso(p.diffMedia4   ?? 0, p.esAsistencia, 'media4')
+          console.log(
+            `[lineaProgreso] "${p.nombre}" | esAsistencia: ${p.esAsistencia}`,
+            `| anterior: ${linAnterior.colorClass} (mejoró:${linAnterior.mejoró})`,
+            `| media4: ${linMedia4.colorClass} (mejoró:${linMedia4.mejoró})`,
+          )
           return (
             <div key={i} className="px-4 py-3 flex flex-col gap-1">
               <div className="flex items-baseline justify-between gap-2">

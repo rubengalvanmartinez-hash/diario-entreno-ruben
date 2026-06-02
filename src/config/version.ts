@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.5'
+export const APP_VERSION = '1.9.6'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.6',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: lógica invertida de Dominadas (esAsistencia) puede no detectar el nombre correctamente',
+      'console.log en calcularProgresosVolumen: nombre, normNombre, esAsistencia, diffs para cada ejercicio',
+      'console.log en SeccionProgresoHoy: colorClass y mejoró para cada línea de progreso',
+      'Diagnóstico ayuda a identificar si el nombre en BD no coincide con ASISTENCIA_NOMBRES',
+    ],
+  },
   {
     version: '1.9.5',
     fecha: '02/06/2026',
