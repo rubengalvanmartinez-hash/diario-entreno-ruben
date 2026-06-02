@@ -13,12 +13,13 @@ export const CHANGELOG: EntradaChangelog[] = [
   {
     version: '1.9.7',
     fecha: '02/06/2026',
-    tipo: 'menor',
+    tipo: 'media',
     cambios: [
-      'Diagnóstico completo en calcularProgresosVolumen: log inicial con nº ejercicios e historial',
-      'Log por ejercicio: volActual, sesiones previas encontradas, volúmenes históricos',
-      'Log explícito de cada descarte con el motivo (volActual≤0 / sin historial / diffs≈0)',
-      'Log final con lista de ejercicios incluidos en "Progreso de hoy"',
+      'BUG: badge "¡Nuevo récord!" verde en Dominadas al SUBIR peso de asistencia (incorrecto)',
+      'Fix tarjeta: para asistencia, bajar peso = 🏆 récord verde; subir = 📉 aviso rojo',
+      'Fix tarjeta: colores de pesos en series coherentes — verde si mejora (baja para asistencia)',
+      'Fix WhatsApp: mismo criterio de récord para asistencia en el texto copiado',
+      'Eliminados console.log de diagnóstico de v1.9.6/v1.9.7',
     ],
   },
   {

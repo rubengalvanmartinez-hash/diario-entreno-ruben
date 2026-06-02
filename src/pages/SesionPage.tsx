@@ -1415,28 +1415,11 @@ function calcularProgresosVolumen(
   historialOrdenado: Sesion[],
   sesionActualId: string,
 ): ProgresoEjercicio[] {
-  // ── LOG INICIAL ──────────────────────────────────────────────────────────
-  console.log(
-    `[calcularProgresosVolumen] INICIO`,
-    `| completados: ${completados.length}`,
-    `| historial: ${historialOrdenado.length} sesiones`,
-    `| sesionActualId: ${sesionActualId}`,
-  )
-  console.log(
-    `[calcularProgresosVolumen] Ejercicios en sesión:`,
-    completados.map((e) => `"${e.nombreSustituido ?? e.nombreSnapshot}" completado=${e.completado} saltado=${e.saltado}`),
-  )
-
   const resultado: ProgresoEjercicio[] = []
   for (const ej of completados) {
     const volActual = calcularVolumen(ej.series)
+    if (volActual <= 0) continue
     const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
-
-    // Filtro 1: volumen actual debe ser > 0
-    if (volActual <= 0) {
-      console.log(`[calcularProgresosVolumen] DESCARTADO "${nombre}" — volActual=${volActual} (≤ 0)`)
-      continue
-    }
 
     // Hasta 4 sesiones previas con volumen > 0 — excluir la sesión actual
     const volPrevios: number[] = []
@@ -1453,38 +1436,14 @@ function calcularProgresosVolumen(
         if (volPrevios.length >= 4) break
       }
     }
-
-    // LOG por ejercicio: historial encontrado
-    console.log(
-      `[calcularProgresosVolumen] "${nombre}"`,
-      `| volActual: ${volActual}`,
-      `| sesiones previas encontradas: ${volPrevios.length}`,
-      volPrevios.length > 0 ? `| vols previos: [${volPrevios.map((v) => v.toFixed(1)).join(', ')}]` : '| SIN HISTORIAL',
-    )
-
-    // Filtro 2: necesita al menos una sesión previa
-    if (volPrevios.length === 0) {
-      console.log(`[calcularProgresosVolumen] DESCARTADO "${nombre}" — sin sesiones previas con ese ejercicio`)
-      continue
-    }
+    if (volPrevios.length === 0) continue
 
     const rawAnterior = volActual - volPrevios[0]
     const media4      = volPrevios.reduce((a, b) => a + b, 0) / volPrevios.length
     const rawMedia4   = volActual - media4
 
-    // Filtro 3: omitir si ambas diferencias son ≈ 0
-    if (Math.abs(rawAnterior) < 0.01 && Math.abs(rawMedia4) < 0.01) {
-      console.log(`[calcularProgresosVolumen] DESCARTADO "${nombre}" — ambas diffs ≈ 0 (sin cambio de volumen)`)
-      continue
-    }
-
-    const esAsist = isAsistencia(nombre)
-    console.log(
-      `[calcularProgresosVolumen] INCLUIDO "${nombre}"`,
-      `| normNombre: "${normNombre(nombre)}"`,
-      `| esAsistencia: ${esAsist}`,
-      `| diffAnterior: ${rawAnterior.toFixed(2)} | diffMedia4: ${rawMedia4.toFixed(2)}`,
-    )
+    // Omitir solo si AMBAS comparaciones son idénticas (sin ningún cambio)
+    if (Math.abs(rawAnterior) < 0.01 && Math.abs(rawMedia4) < 0.01) continue
 
     // Almacenar siempre ambos valores — null solo si no hay datos históricos
     resultado.push({
@@ -1492,14 +1451,9 @@ function calcularProgresosVolumen(
       volActual,
       diffAnterior: rawAnterior,   // siempre presente (puede ser 0)
       diffMedia4:   rawMedia4,     // siempre presente (puede ser 0)
-      esAsistencia: esAsist,
+      esAsistencia: isAsistencia(nombre),
     })
   }
-
-  console.log(
-    `[calcularProgresosVolumen] RESULTADO FINAL: ${resultado.length} ejercicios incluidos:`,
-    resultado.map((r) => r.nombre),
-  )
   return resultado
 }
 
@@ -1547,12 +1501,19 @@ function generarTextoWhatsApp(
           e.completado && !e.saltado,
       ) ?? null
     }, null)
-    const maxHist   = ultimoHist ? pesoMax(ultimoHist.series) : null
-    const maxActual = pesoMax(ej.series)
+    const maxHist     = ultimoHist ? pesoMax(ultimoHist.series) : null
+    const maxActual   = pesoMax(ej.series)
+    const ejNombre    = ej.nombreSustituido ?? ej.nombreSnapshot
+    const ejEsAsist   = isAsistencia(ejNombre)
     if (ultimoHist === null && maxActual !== null) {
       lines.push('  ⭐ ¡Primera vez!')
-    } else if (maxHist !== null && maxActual !== null && maxActual > maxHist) {
-      lines.push(`  🏆 ¡Nuevo récord! +${fmtKg(maxActual - maxHist)}kg`)
+    } else if (maxHist !== null && maxActual !== null) {
+      const diff = maxActual - maxHist
+      if (ejEsAsist && diff < 0) {
+        lines.push(`  🏆 ¡Récord! -${fmtKg(Math.abs(diff))}kg de asistencia (menos ayuda 💪)`)
+      } else if (!ejEsAsist && diff > 0) {
+        lines.push(`  🏆 ¡Nuevo récord! +${fmtKg(diff)}kg`)
+      }
     }
   }
   lines.push('━━━━━━━━━━━━━━━━')
@@ -1632,11 +1593,6 @@ function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
           // Ambas líneas siempre presentes cuando hay datos históricos
           const linAnterior = lineaProgreso(p.diffAnterior ?? 0, p.esAsistencia, 'anterior')
           const linMedia4   = lineaProgreso(p.diffMedia4   ?? 0, p.esAsistencia, 'media4')
-          console.log(
-            `[lineaProgreso] "${p.nombre}" | esAsistencia: ${p.esAsistencia}`,
-            `| anterior: ${linAnterior.colorClass} (mejoró:${linAnterior.mejoró})`,
-            `| media4: ${linMedia4.colorClass} (mejoró:${linMedia4.mejoró})`,
-          )
           return (
             <div key={i} className="px-4 py-3 flex flex-col gap-1">
               <div className="flex items-baseline justify-between gap-2">
@@ -1777,7 +1733,8 @@ function ResumenSesion({
 
             {/* Tarjetas por ejercicio */}
             {completados.map((ej, ejIdx) => {
-              const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
+              const nombre     = ej.nombreSustituido ?? ej.nombreSnapshot
+              const esAsist    = isAsistencia(nombre)
 
               const ultimoHist = historialOrdenado.reduce<SesionEjercicio | null>((acc, ses) => {
                 if (acc) return acc
@@ -1791,6 +1748,12 @@ function ResumenSesion({
               const maxHist    = ultimoHist ? pesoMax(ultimoHist.series) : null
               const maxActual  = pesoMax(ej.series)
               const diferencia = maxHist !== null && maxActual !== null ? maxActual - maxHist : null
+
+              // Para asistencia: mejoró si BAJA el peso (menos ayuda)
+              const diferenciaEsBuena = diferencia !== null && (
+                esAsist ? diferencia < 0 : diferencia > 0
+              )
+              const diferenciaEsMala = diferencia !== null && diferencia !== 0 && !diferenciaEsBuena
 
               return (
                 <div
@@ -1811,7 +1774,7 @@ function ResumenSesion({
                       {diferencia !== null && diferencia !== 0 && (
                         <span className={[
                           'text-xs font-black px-2 py-0.5 rounded-full',
-                          diferencia > 0
+                          diferenciaEsBuena
                             ? 'text-emerald-400 bg-emerald-500/10'
                             : 'text-red-400 bg-red-500/10',
                         ].join(' ')}>
@@ -1831,7 +1794,13 @@ function ResumenSesion({
                       const histSerie   = ultimoHist?.series.find((hs) => hs.numero === s.numero)
                       const pesoHistNum = histSerie && histSerie.pesoKg !== '' ? Number(histSerie.pesoKg) : null
                       const pesoActNum  = s.pesoKg !== '' ? Number(s.pesoKg) : null
-                      const supera      = pesoActNum !== null && pesoHistNum !== null && pesoActNum > pesoHistNum
+                      // Para asistencia: verde si BAJA; para normal: verde si SUBE
+                      const esBueno = pesoActNum !== null && pesoHistNum !== null && (
+                        esAsist ? pesoActNum < pesoHistNum : pesoActNum > pesoHistNum
+                      )
+                      const esMalo = pesoActNum !== null && pesoHistNum !== null && (
+                        esAsist ? pesoActNum > pesoHistNum : pesoActNum < pesoHistNum
+                      )
 
                       return (
                         <div key={sIdx} className="px-4 py-2.5 flex items-center gap-3">
@@ -1840,7 +1809,7 @@ function ResumenSesion({
                           </span>
                           <span className={[
                             'text-sm font-bold tabular-nums',
-                            supera ? 'text-emerald-400' : 'text-white',
+                            esBueno ? 'text-emerald-400' : esMalo ? 'text-red-400' : 'text-white',
                           ].join(' ')}>
                             {s.pesoKg !== '' ? `${s.pesoKg}kg` : '—'}
                           </span>
@@ -1863,12 +1832,22 @@ function ResumenSesion({
                     })}
                   </div>
 
-                  {/* Línea de récord / primera vez */}
-                  {diferencia !== null && diferencia > 0 && (
+                  {/* Banner récord / primera vez */}
+                  {diferenciaEsBuena && diferencia !== null && (
                     <div className="px-4 py-2 border-t border-zinc-800/60 flex items-center gap-1.5">
                       <span className="text-sm">🏆</span>
                       <span className="text-xs font-bold text-emerald-400">
-                        ¡Nuevo récord! +{fmtKg(diferencia)}kg respecto al último entreno
+                        {esAsist
+                          ? `¡Récord! -${fmtKg(Math.abs(diferencia))}kg de asistencia (menos ayuda 💪)`
+                          : `¡Nuevo récord! +${fmtKg(diferencia)}kg respecto al último entreno`}
+                      </span>
+                    </div>
+                  )}
+                  {diferenciaEsMala && diferencia !== null && esAsist && (
+                    <div className="px-4 py-2 border-t border-zinc-800/60 flex items-center gap-1.5">
+                      <span className="text-sm">📉</span>
+                      <span className="text-xs font-bold text-red-400">
+                        +{fmtKg(Math.abs(diferencia))}kg más de asistencia respecto al último entreno
                       </span>
                     </div>
                   )}
