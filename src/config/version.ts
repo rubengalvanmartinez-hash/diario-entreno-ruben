@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7.2'
+export const APP_VERSION = '1.7.4'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.7.4',
+    fecha: '02/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'Supabase como fuente de verdad ÚNICA para todos — incluido Rubén',
+      'Rubén ahora carga sus datos desde Supabase al hacer login en cualquier dispositivo',
+      'Protección: si Supabase devuelve vacío pero hay datos locales, se conservan los locales',
+      'Eliminados guards isRubenActivo() del store que bloqueaban importarHistorialCompleto/importarHistorial/actualizarHistorialRemoto',
+      'useSupabaseSync ahora activo para todos los usuarios (sin exclusión de Rubén)',
+      'pullHistorialInvitado y refreshFromSupabase usan RUBEN_UUID para Rubén',
+    ],
+  },
   {
     version: '1.7.2',
     fecha: '02/06/2026',

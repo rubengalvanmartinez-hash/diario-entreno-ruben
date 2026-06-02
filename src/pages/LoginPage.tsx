@@ -14,6 +14,7 @@ import {
   crearEjerciciosDesdeTemplate,
   forzarSincronizacionPendientes,
   getRubenUUID,
+  RUBEN_UUID,
   asegurarUsuarioRuben,
   type UsuarioSupabase,
 } from '../services/supabase'
@@ -157,7 +158,6 @@ export default function LoginPage() {
 
     const esRuben = u.id === getRubenUUID() || u.nombre === 'Rubén'
 
-    // Si es Rubén, actualizar fitlog-ruben-uuid con el UUID del DB
     if (esRuben) {
       localStorage.setItem('fitlog-ruben-uuid', u.id)
       try { await asegurarUsuarioRuben(u.id) } catch { /* sin conexión: OK */ }
@@ -173,26 +173,30 @@ export default function LoginPage() {
 
     await useFitLogStore.persist.rehydrate()
 
-    if (esRuben) {
-      // Rubén: localStorage es la fuente de verdad absoluta — no cargar de Supabase
-      navigate('/', { replace: true })
-      return
-    }
-
-    // Amigos: cargar datos frescos de Supabase
+    // ── Carga unificada desde Supabase para TODOS los usuarios ───────────────
     setFase('cargando-datos')
+    const idSupabase = esRuben ? RUBEN_UUID : u.id
     try {
-      await forzarSincronizacionPendientes(u.id).catch(console.error)
-      const { sesiones, registrosPeso } = await cargarDatosUsuario(u.id)
-      useFitLogStore.getState().importarHistorialCompleto(sesiones, registrosPeso)
-      const ejercicios = await obtenerEjerciciosUsuario(u.id)
+      await forzarSincronizacionPendientes(idSupabase).catch(console.error)
+      const sesionesLocales = useFitLogStore.getState().historialSesiones
+      const { sesiones, registrosPeso } = await cargarDatosUsuario(idSupabase)
+      if (sesiones.length > 0) {
+        // Supabase tiene datos — es la fuente de verdad entre dispositivos
+        useFitLogStore.getState().importarHistorialCompleto(sesiones, registrosPeso)
+      } else if (sesionesLocales.length > 0) {
+        // Supabase vacío pero hay datos locales — conservar sin sobrescribir
+        console.warn('[Login] Supabase vacío — conservando datos locales:', sesionesLocales.length, 'sesiones')
+      }
+      const ejercicios = await obtenerEjerciciosUsuario(idSupabase)
       if (ejercicios) {
         useFitLogStore.getState().importarEjercicios(ejercicios)
-      } else {
-        const nuevos = await crearEjerciciosDesdeTemplate(u.id)
+      } else if (!esRuben) {
+        const nuevos = await crearEjerciciosDesdeTemplate(idSupabase)
         useFitLogStore.getState().importarEjercicios(nuevos)
       }
-    } catch { /* sin conexión: usar datos locales cacheados */ }
+    } catch {
+      console.warn('[Login] Sin conexión — usando datos locales cacheados')
+    }
     navigate('/', { replace: true })
   }
 

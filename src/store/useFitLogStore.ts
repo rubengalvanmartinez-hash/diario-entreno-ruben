@@ -150,22 +150,6 @@ function getStoreKey(): string {
   }
 }
 
-/**
- * Devuelve true SOLO cuando se confirma explícitamente que el usuario activo es Rubén.
- * A diferencia de getStoreKey(), NO devuelve true cuando no hay sesión activa.
- * Usar este helper para guards de protección — nunca getStoreKey() para eso.
- */
-function isRubenActivo(): boolean {
-  try {
-    const raw = localStorage.getItem('fitlog_usuario_activo')
-    if (!raw) return false // sin sesión → no bloquear
-    const u = JSON.parse(raw) as { esRuben?: boolean }
-    return u?.esRuben === true
-  } catch {
-    return false
-  }
-}
-
 // Estado vacío serializado que se devuelve a usuarios sin datos previos
 const EMPTY_PERSIST = JSON.stringify({
   state: {
@@ -549,20 +533,12 @@ export const useFitLogStore = create<FitLogStore>()(
       },
 
       importarHistorialCompleto(sesiones, registrosPeso) {
-        // REEMPLAZA completamente — Supabase es la fuente de verdad
-        if (isRubenActivo()) {
-          console.error('[STORE] ⛔ importarHistorialCompleto llamada con usuario Rubén — BLOQUEADO para proteger datos locales')
-          return
-        }
+        // REEMPLAZA completamente — Supabase es la fuente de verdad para todos
         set({ historialSesiones: sesiones, registrosPeso })
       },
 
       importarHistorial(sesiones, registrosPeso) {
         // MERGE: conservar registros locales pendientes que no estén en el remoto
-        if (isRubenActivo()) {
-          console.error('[STORE] ⛔ importarHistorial llamada con usuario Rubén — BLOQUEADO para proteger datos locales')
-          return
-        }
         set((s) => {
           const remoteSessionIds = new Set(sesiones.map((ses) => ses.id))
           const localPending = s.historialSesiones.filter(
@@ -585,18 +561,6 @@ export const useFitLogStore = create<FitLogStore>()(
 
       actualizarHistorialRemoto(sesiones) {
         // Fusión segura: preserva sesiones locales pendientes que Supabase aún no conoce
-        // Guardia doble: isRubenActivo() + lectura directa del localStorage (defensa en profundidad)
-        if (isRubenActivo()) {
-          console.error('[STORE] ⛔ actualizarHistorialRemoto llamada con usuario Rubén — BLOQUEADO')
-          return
-        }
-        try {
-          const u = JSON.parse(localStorage.getItem('fitlog_usuario_activo') || '{}')
-          if (u?.esRuben) {
-            console.error('[STORE] ⛔ actualizarHistorialRemoto (guardia 2) — BLOQUEADO para Rubén')
-            return
-          }
-        } catch { /* si falla la lectura, continuar — invitados no deben bloquearse */ }
         set((s) => {
           const remoteIds = new Set(sesiones.map((ses) => ses.id))
           const localPending = s.historialSesiones.filter(

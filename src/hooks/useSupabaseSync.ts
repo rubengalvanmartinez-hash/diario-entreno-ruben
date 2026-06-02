@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { cargarDatosUsuario, getUsuarioActivo } from '../services/supabase'
+import { cargarDatosUsuario, getUsuarioActivo, RUBEN_UUID } from '../services/supabase'
 import { useFitLogStore } from '../store/useFitLogStore'
 
 // ---------------------------------------------------------------------------
@@ -27,11 +27,12 @@ export function useSyncingStatus(): boolean {
 export async function refreshFromSupabase(): Promise<void> {
   if (_inFlight) return
   const usuario = getUsuarioActivo()
-  if (!usuario || usuario.esRuben) return // GUARDIA: Rubén nunca sobreescribe desde Supabase
+  if (!usuario) return
   _inFlight = true
   setIsSyncing(true)
   try {
-    const { sesiones, registrosPeso } = await cargarDatosUsuario(usuario.id)
+    const idSupabase = usuario.esRuben ? RUBEN_UUID : usuario.id
+    const { sesiones, registrosPeso } = await cargarDatosUsuario(idSupabase)
     useFitLogStore.getState().importarHistorial(sesiones, registrosPeso)
   } catch {
     // Sin conexión — caché local intacto
@@ -70,14 +71,13 @@ export function usePullStatus(): PullStatus {
 export async function pullHistorialInvitado(): Promise<void> {
   if (_pullInFlight) return
   const usuario = getUsuarioActivo()
-  if (!usuario || usuario.esRuben) return
+  if (!usuario) return
 
   _pullInFlight = true
   try {
-    const { sesiones } = await cargarDatosUsuario(usuario.id)
+    const idSupabase = usuario.esRuben ? RUBEN_UUID : usuario.id
+    const { sesiones } = await cargarDatosUsuario(idSupabase)
     console.log(`[Sync] Pull OK: remoto=${sesiones.length}`)
-    // Condición: actualizar siempre que Supabase devuelva datos (no vacío)
-    // Antes era > localCount — fallaba cuando los counts coincidían pero el contenido era distinto
     if (sesiones.length > 0) {
       useFitLogStore.getState().actualizarHistorialRemoto(sesiones)
     }
@@ -138,7 +138,7 @@ export function useSupabaseSync(): void {
 
   useEffect(() => {
     const usuario = getUsuarioActivo()
-    if (!usuario || usuario.esRuben) return // solo invitados
+    if (!usuario) return
 
     // Pull inmediato al montar
     pullHistorialInvitado()
