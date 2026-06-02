@@ -129,6 +129,13 @@ export interface FitLogActions {
   actualizarPesosRemoto: (registrosPeso: RegistroPeso[]) => void
   /** Actualiza el timestamp del último sync para forzar re-render en suscriptores. */
   setUltimaSync: (ts: number) => void
+  /**
+   * Reemplaza historialComposicion y perfilCorporal con datos de Supabase.
+   * Si perfil es null, conserva el perfil local existente.
+   */
+  importarComposicionYPerfil: (historial: RegistroComposicion[], perfil: PerfilCorporal | null) => void
+  /** Edita una serie del historial (para correcciones manuales). */
+  editarSerieHistorial: (sesionId: string, ejercicioNombre: string, serieNum: number, campo: 'reps' | 'pesoKg', valor: number) => void
 
   // ── Objetivos de entreno ───────────────────────────────────────────────
   /** Guarda (o borra si null) el objetivo de subir/bajar peso para un ejercicio */
@@ -588,6 +595,34 @@ export const useFitLogStore = create<FitLogStore>()(
 
       setUltimaSync(ts) {
         set({ ultimaSyncTimestamp: ts })
+      },
+
+      importarComposicionYPerfil(historial, perfil) {
+        set((s) => ({
+          historialComposicion: historial,
+          perfilCorporal: perfil ?? s.perfilCorporal,
+        }))
+      },
+
+      editarSerieHistorial(sesionId, ejercicioNombre, serieNum, campo, valor) {
+        set((s) => ({
+          historialSesiones: s.historialSesiones.map((ses) => {
+            if (ses.id !== sesionId) return ses
+            return {
+              ...ses,
+              ejercicios: ses.ejercicios.map((ej) => {
+                const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
+                if (nombre !== ejercicioNombre) return ej
+                return {
+                  ...ej,
+                  series: ej.series.map((sr) =>
+                    sr.numero === serieNum ? { ...sr, [campo]: valor } : sr,
+                  ),
+                }
+              }),
+            }
+          }),
+        }))
       },
 
       // ── Objetivos de entreno ──────────────────────────────────────────

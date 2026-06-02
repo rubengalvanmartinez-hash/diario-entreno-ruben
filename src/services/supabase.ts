@@ -8,6 +8,9 @@ import type {
   DiaId,
   TipoSesion,
   Ejercicio,
+  RegistroComposicion,
+  PerfilCorporal,
+  CategoriaImc,
 } from '../types/models'
 import { DEFAULT_EJERCICIOS } from '../store/defaultData'
 import { useFitLogStore } from '../store/useFitLogStore'
@@ -593,4 +596,123 @@ export async function forzarSincronizacionPendientes(
   }
 
   return { sesiones, pesos, errores }
+}
+
+// ---------------------------------------------------------------------------
+// Composición corporal
+// ---------------------------------------------------------------------------
+
+/** Guarda (insert o reemplaza por fecha) un registro de composición corporal. */
+export async function guardarComposicion(
+  usuarioId: string,
+  registro: Omit<RegistroComposicion, 'id'>,
+): Promise<void> {
+  // Borrar el registro del mismo día si existe (idempotente)
+  await supabase
+    .from('composicion_corporal')
+    .delete()
+    .eq('usuario_id', usuarioId)
+    .eq('fecha', registro.fecha)
+
+  const masaGrasaKg = registro.pesoKg * (registro.pctGrasa / 100)
+  const { error } = await supabase.from('composicion_corporal').insert({
+    usuario_id:         usuarioId,
+    fecha:              registro.fecha,
+    peso_kg:            registro.pesoKg,
+    imc:                registro.imc,
+    categoria_imc:      registro.categoriaImc,
+    porcentaje_grasa:   registro.pctGrasa,
+    porcentaje_musculo: registro.pctMusculo,
+    masa_grasa_kg:      +masaGrasaKg.toFixed(2),
+    masa_libre_kg:      +(registro.pesoKg - masaGrasaKg).toFixed(2),
+  })
+  if (error) throw error
+}
+
+/** Carga el historial de composición corporal de un usuario desde Supabase. */
+export async function cargarComposicion(
+  usuarioId: string,
+): Promise<RegistroComposicion[]> {
+  const { data, error } = await supabase
+    .from('composicion_corporal')
+    .select('*')
+    .eq('usuario_id', usuarioId)
+    .order('fecha', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map((r) => ({
+    id:           String(r.id),
+    fecha:        String(r.fecha),
+    pesoKg:       Number(r.peso_kg),
+    imc:          Number(r.imc),
+    categoriaImc: String(r.categoria_imc) as CategoriaImc,
+    pctGrasa:     Number(r.porcentaje_grasa),
+    pctMusculo:   Number(r.porcentaje_musculo),
+  }))
+}
+
+/** Guarda (upsert) el perfil corporal del usuario (altura, edad, sexo, medidas). */
+export async function guardarPerfilCorporal(
+  usuarioId: string,
+  perfil: PerfilCorporal,
+): Promise<void> {
+  const { error } = await supabase.from('perfil_corporal').upsert(
+    {
+      usuario_id: usuarioId,
+      altura_cm:  perfil.alturaCm,
+      edad:       perfil.edad,
+      sexo:       perfil.sexo,
+      cintura_cm: perfil.cinturaCm,
+      cuello_cm:  perfil.cuelloCm,
+      cadera_cm:  perfil.caderaCm ?? null,
+    },
+    { onConflict: 'usuario_id' },
+  )
+  if (error) throw error
+}
+
+/** Carga el perfil corporal del usuario desde Supabase. Devuelve null si no existe. */
+export async function cargarPerfilCorporal(
+  usuarioId: string,
+): Promise<PerfilCorporal | null> {
+  const { data, error } = await supabase
+    .from('perfil_corporal')
+    .select('*')
+    .eq('usuario_id', usuarioId)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return null
+  return {
+    alturaCm:  Number(data.altura_cm),
+    edad:      Number(data.edad),
+    sexo:      String(data.sexo) as 'hombre' | 'mujer',
+    cinturaCm: Number(data.cintura_cm),
+    cuelloCm:  Number(data.cuello_cm),
+    caderaCm:  data.cadera_cm != null ? Number(data.cadera_cm) : undefined,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Edición de series en historial
+// ---------------------------------------------------------------------------
+
+/**
+ * Actualiza el valor de reps o peso_kg de una serie en el historial.
+ * La clave compuesta (usuario_id, sesion_id, ejercicio, serie) identifica la fila.
+ */
+export async function actualizarSerieSupabase(
+  usuarioId: string,
+  sesionId: string,
+  ejercicioNombre: string,
+  serieNum: number,
+  campo: 'reps' | 'peso_kg',
+  valor: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from('entrenos')
+    .update({ [campo]: valor })
+    .eq('usuario_id', usuarioId)
+    .eq('sesion_id', sesionId)
+    .eq('ejercicio', ejercicioNombre)
+    .eq('serie', serieNum)
+  if (error) throw error
 }

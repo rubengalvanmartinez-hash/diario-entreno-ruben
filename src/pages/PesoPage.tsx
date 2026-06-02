@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/shallow'
 import { useNavigate } from 'react-router-dom'
 import { useFitLogStore } from '../store/useFitLogStore'
 import type { PerfilCorporal, CategoriaImc } from '../types/models'
-import { getUsuarioActivo, sincronizarPesoSupabase, getRubenUUID } from '../services/supabase'
+import { getUsuarioActivo, sincronizarPesoSupabase, getRubenUUID, guardarComposicion, guardarPerfilCorporal } from '../services/supabase'
 import { sincronizarPeso } from '../services/googleSheets'
 
 const DIAS  = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado']
@@ -645,14 +645,31 @@ function ComposicionCorporal() {
     }
     setPerfilCorporal(perfil)
 
-    registrarComposicion({
+    const registroComp = {
       fecha:        new Date().toISOString().slice(0, 10),
       pesoKg:       pesoActual,
       imc:          +resultados.imc.toFixed(1),
       categoriaImc: resultados.catImc,
       pctGrasa:     +resultados.pctGrasa.toFixed(1),
       pctMusculo:   +resultados.pctMusculo.toFixed(1),
-    })
+    }
+    registrarComposicion(registroComp)
+
+    // Persistir en Supabase (fire-and-forget)
+    const usuarioActivo = getUsuarioActivo()
+    if (usuarioActivo) {
+      const idSupabase = usuarioActivo.esRuben ? getRubenUUID() : usuarioActivo.id
+      guardarComposicion(idSupabase, registroComp).catch(console.error)
+      guardarPerfilCorporal(idSupabase, {
+        alturaCm:  parseFloat(altura),
+        edad:      parseFloat(edad) || 0,
+        sexo,
+        cinturaCm: parseFloat(cintura),
+        cuelloCm:  parseFloat(cuello),
+        ...(sexo === 'mujer' ? { caderaCm: parseFloat(cadera) } : {}),
+      }).catch(console.error)
+    }
+
     setGuardado(true)
     setTimeout(() => setGuardado(false), 2000)
   }

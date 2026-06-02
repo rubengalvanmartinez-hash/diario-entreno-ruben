@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown } from 'lucide-react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown, ChevronRight, ArrowLeft, AlertTriangle, X } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { obtenerImagen } from '../services/imageDB'
-import { getUsuarioActivo } from '../services/supabase'
+import { getUsuarioActivo, getIdActivo, actualizarSerieSupabase } from '../services/supabase'
 import { generarInformePDF } from '../services/pdfReport'
 import type { Ejercicio, EtiquetaSerie, Sesion } from '../types/models'
 
@@ -524,6 +524,7 @@ export default function TendenciasPage() {
 function ResumenGeneral() {
   const historial  = useFitLogStore(useShallow((s) => s.historialSesiones))
   const ejercicios = useFitLogStore(useShallow((s) => s.ejercicios))
+  const [panelPR, setPanelPR] = useState<{ id: string; nombre: string } | null>(null)
 
   // Días desde último entrenamiento
   const diasDesdeUltimo = useMemo(() => {
@@ -592,6 +593,7 @@ function ResumenGeneral() {
   }
 
   return (
+    <>
     <div className="flex flex-col gap-4 px-4">
 
       {/* Días desde último entrenamiento */}
@@ -640,21 +642,26 @@ function ResumenGeneral() {
       {/* Personal Records */}
       {personalRecords.length > 0 && (
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-          <div className="px-4 pt-4 pb-2">
+          <div className="px-4 pt-4 pb-2 flex items-center justify-between">
             <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">
               Personal Records
             </p>
+            <p className="text-[10px] text-zinc-600">Toca para ver historial</p>
           </div>
           {/* Cabecera tabla */}
-          <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 px-4 py-2 border-b border-zinc-800">
+          <div className="grid grid-cols-[1fr_auto_auto_16px] gap-x-3 px-4 py-2 border-b border-zinc-800">
             <span className="text-[10px] text-zinc-600 font-semibold uppercase">Ejercicio</span>
             <span className="text-[10px] text-zinc-600 font-semibold uppercase text-right">Peso</span>
             <span className="text-[10px] text-zinc-600 font-semibold uppercase text-right">1RM</span>
+            <span />
           </div>
           {personalRecords.map(({ ej, mejorPeso, mejor1RM, mejorFecha }) => (
-            <div key={ej.id}
-              className="grid grid-cols-[1fr_auto_auto] gap-x-3 items-center px-4 py-3
-                         border-b border-zinc-800/50 last:border-0">
+            <button
+              key={ej.id}
+              onClick={() => setPanelPR({ id: ej.id, nombre: ej.nombre })}
+              className="w-full grid grid-cols-[1fr_auto_auto_16px] gap-x-3 items-center px-4 py-3
+                         border-b border-zinc-800/50 last:border-0 active:bg-zinc-800/50 text-left"
+            >
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-white truncate">{ej.nombre}</p>
                 <p className="text-[11px] text-zinc-600">
@@ -667,8 +674,281 @@ function ResumenGeneral() {
               <p className="text-sm font-bold text-purple-400 tabular-nums text-right shrink-0">
                 {mejor1RM.toFixed(1)}
               </p>
-            </div>
+              <ChevronRight size={14} className="text-zinc-600 shrink-0" />
+            </button>
           ))}
+        </div>
+      )}
+    </div>
+
+    {/* Panel de historial editable */}
+    {panelPR && (
+      <PanelHistoricoSeries
+        ejercicioId={panelPR.id}
+        nombreEjercicio={panelPR.nombre}
+        onCerrar={() => setPanelPR(null)}
+      />
+    )}
+    </>
+  )
+}
+
+// ── PanelHistoricoSeries ──────────────────────────────────────────────────────
+
+interface EditPending {
+  sesionId:      string
+  ejNombre:      string   // nombre columna en entrenos (nombreSustituido ?? nombreSnapshot)
+  serieNum:      number
+  campo:         'reps' | 'pesoKg'
+  valorOriginal: number
+  valorStr:      string
+}
+
+function PanelHistoricoSeries({
+  ejercicioId, nombreEjercicio, onCerrar,
+}: {
+  ejercicioId:     string
+  nombreEjercicio: string
+  onCerrar:        () => void
+}) {
+  const historial        = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const editarSerieHistorial = useFitLogStore((s) => s.editarSerieHistorial)
+
+  const [edit,         setEdit]         = useState<EditPending | null>(null)
+  const [confirmModal, setConfirmModal] = useState(false)
+  const [guardando,    setGuardando]    = useState(false)
+  const [errorMsg,     setErrorMsg]     = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Sesiones que contienen este ejercicio, más recientes primero
+  const sesiones = useMemo(() =>
+    historial
+      .filter((ses) => ses.ejercicios.some((e) => matchesEjercicio(e, ejercicioId, nombreEjercicio) && e.completado))
+      .sort((a, b) => b.fecha.localeCompare(a.fecha))
+      .map((ses) => ({
+        ses,
+        ej: ses.ejercicios.find((e) => matchesEjercicio(e, ejercicioId, nombreEjercicio))!,
+      })),
+  [historial, ejercicioId, nombreEjercicio])
+
+  useEffect(() => {
+    if (edit) inputRef.current?.focus()
+  }, [edit])
+
+  const iniciarEdicion = (
+    sesionId: string,
+    ejNombre: string,
+    serieNum: number,
+    campo: 'reps' | 'pesoKg',
+    valorActual: number,
+  ) => {
+    setErrorMsg('')
+    setEdit({ sesionId, ejNombre, serieNum, campo, valorOriginal: valorActual, valorStr: String(valorActual) })
+  }
+
+  const handleGuardar = async () => {
+    if (!edit) return
+    const nuevoValor = parseFloat(edit.valorStr)
+    if (isNaN(nuevoValor) || nuevoValor <= 0) {
+      setErrorMsg('Valor no válido')
+      return
+    }
+    if (nuevoValor === edit.valorOriginal) {
+      setEdit(null)
+      return
+    }
+    setConfirmModal(true)
+  }
+
+  const confirmarGuardar = async () => {
+    if (!edit) return
+    const nuevoValor = parseFloat(edit.valorStr)
+    setConfirmModal(false)
+    setGuardando(true)
+    setErrorMsg('')
+
+    // Actualizar store optimistamente
+    editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, nuevoValor)
+
+    try {
+      const idActivo = getIdActivo()
+      if (!idActivo) throw new Error('Sin usuario activo')
+      const campoDB: 'reps' | 'peso_kg' = edit.campo === 'reps' ? 'reps' : 'peso_kg'
+      await actualizarSerieSupabase(idActivo, edit.sesionId, edit.ejNombre, edit.serieNum, campoDB, nuevoValor)
+      setEdit(null)
+    } catch (e) {
+      // Revertir en el store
+      editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, edit.valorOriginal)
+      setErrorMsg('Error al guardar. Cambio revertido.')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col" style={{ overflowY: 'auto' }}>
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-zinc-950 border-b border-zinc-800 px-4 py-3 flex items-center gap-3">
+        <button onClick={onCerrar} className="p-1 -ml-1 rounded-lg active:bg-zinc-800">
+          <ArrowLeft size={20} className="text-zinc-400" />
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-white truncate">{nombreEjercicio}</p>
+          <p className="text-[10px] text-zinc-500">Historial de series</p>
+        </div>
+      </div>
+
+      {/* Aviso edición */}
+      <div className="mx-4 mt-4 mb-2 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2 flex items-start gap-2">
+        <AlertTriangle size={13} className="text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-[11px] text-amber-300/80 leading-relaxed">
+          Toca cualquier valor de reps o kg para editarlo. Los cambios se guardan en Supabase y afectan a tus estadísticas.
+        </p>
+      </div>
+
+      {sesiones.length === 0 && (
+        <p className="text-center text-zinc-500 text-sm py-12 px-6">Sin sesiones registradas para este ejercicio.</p>
+      )}
+
+      {/* Lista de sesiones */}
+      <div className="flex flex-col gap-3 px-4 pb-32 mt-2">
+        {sesiones.map(({ ses, ej }) => {
+          const ejNombre = ej.nombreSustituido ?? ej.nombreSnapshot
+          return (
+            <div key={ses.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-zinc-800/60">
+                <p className="text-xs font-bold text-zinc-300">{fechaCorta(ses.fecha)}</p>
+              </div>
+              {/* Cabecera */}
+              <div className="grid grid-cols-[auto_1fr_1fr] gap-x-2 px-4 py-1.5 border-b border-zinc-800/40">
+                <span className="text-[10px] text-zinc-600 font-semibold w-6">#</span>
+                <span className="text-[10px] text-zinc-600 font-semibold text-center">Reps</span>
+                <span className="text-[10px] text-zinc-600 font-semibold text-center">Kg</span>
+              </div>
+              {ej.series.map((sr) => {
+                const reps   = typeof sr.reps   === 'number' ? sr.reps   : 0
+                const pesoKg = typeof sr.pesoKg === 'number' ? sr.pesoKg : 0
+                const isEditReps = edit?.sesionId === ses.id && edit.serieNum === sr.numero && edit.campo === 'reps'
+                const isEditKg   = edit?.sesionId === ses.id && edit.serieNum === sr.numero && edit.campo === 'pesoKg'
+                return (
+                  <div key={sr.numero} className="grid grid-cols-[auto_1fr_1fr] gap-x-2 items-center px-4 py-2.5
+                                                   border-b border-zinc-800/30 last:border-0">
+                    <span className="text-xs text-zinc-600 w-6 text-center tabular-nums">{sr.numero}</span>
+                    {/* Reps */}
+                    {isEditReps ? (
+                      <input
+                        ref={inputRef}
+                        type="number"
+                        inputMode="numeric"
+                        value={edit!.valorStr}
+                        onChange={(e) => setEdit((prev) => prev ? { ...prev, valorStr: e.target.value } : prev)}
+                        className="w-full bg-blue-600/20 border border-blue-500 rounded-lg px-2 py-1
+                                   text-sm font-bold text-center text-white outline-none"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => iniciarEdicion(ses.id, ejNombre, sr.numero, 'reps', reps)}
+                        disabled={guardando}
+                        className="w-full rounded-lg py-1 text-sm font-bold text-center
+                                   text-zinc-200 active:bg-zinc-700 disabled:opacity-40"
+                      >
+                        {reps > 0 ? reps : '—'}
+                      </button>
+                    )}
+                    {/* Peso kg */}
+                    {isEditKg ? (
+                      <input
+                        ref={isEditReps ? undefined : inputRef}
+                        type="number"
+                        inputMode="decimal"
+                        value={edit!.valorStr}
+                        onChange={(e) => setEdit((prev) => prev ? { ...prev, valorStr: e.target.value } : prev)}
+                        className="w-full bg-blue-600/20 border border-blue-500 rounded-lg px-2 py-1
+                                   text-sm font-bold text-center text-white outline-none"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => iniciarEdicion(ses.id, ejNombre, sr.numero, 'pesoKg', pesoKg)}
+                        disabled={guardando}
+                        className="w-full rounded-lg py-1 text-sm font-bold text-center
+                                   text-zinc-200 active:bg-zinc-700 disabled:opacity-40"
+                      >
+                        {pesoKg > 0 ? pesoKg : '—'}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Barra inferior flotante cuando hay edición activa */}
+      {edit && (
+        <div className="fixed bottom-0 left-0 right-0 z-20 bg-zinc-900 border-t border-zinc-800 px-4 py-3 flex gap-2">
+          <button
+            onClick={() => { setEdit(null); setErrorMsg('') }}
+            disabled={guardando}
+            className="flex-1 rounded-xl py-3 text-sm font-bold text-zinc-400 bg-zinc-800 active:bg-zinc-700 disabled:opacity-40"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleGuardar}
+            disabled={guardando}
+            className="flex-1 rounded-xl py-3 text-sm font-bold text-white bg-blue-600 active:bg-blue-700 disabled:opacity-40"
+          >
+            {guardando ? 'Guardando…' : 'Guardar cambios'}
+          </button>
+        </div>
+      )}
+
+      {/* Error toast */}
+      {errorMsg && (
+        <div className="fixed bottom-20 left-4 right-4 z-30 bg-red-900/90 border border-red-700 rounded-xl px-4 py-3
+                        flex items-center justify-between gap-2">
+          <p className="text-sm text-red-200 font-medium">{errorMsg}</p>
+          <button onClick={() => setErrorMsg('')}><X size={16} className="text-red-400" /></button>
+        </div>
+      )}
+
+      {/* Modal de confirmación */}
+      {confirmModal && edit && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 px-4 pb-6">
+          <div className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-2xl p-5 flex flex-col gap-4">
+            <div className="flex items-start gap-3">
+              <div className="size-9 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
+                <AlertTriangle size={18} className="text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-white">¿Confirmar edición?</p>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  Vas a cambiar{' '}
+                  <span className="text-white font-semibold">
+                    {edit.campo === 'reps' ? 'reps' : 'peso (kg)'}
+                  </span>{' '}
+                  de <span className="text-zinc-300">{edit.valorOriginal}</span> a{' '}
+                  <span className="text-white font-semibold">{edit.valorStr}</span>.
+                  Esto modifica el historial permanentemente.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmModal(false)}
+                className="flex-1 rounded-xl py-3 text-sm font-bold text-zinc-400 bg-zinc-800 active:bg-zinc-700"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarGuardar}
+                className="flex-1 rounded-xl py-3 text-sm font-bold text-white bg-amber-600 active:bg-amber-700"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -16,6 +16,8 @@ import {
   getRubenUUID,
   RUBEN_UUID,
   asegurarUsuarioRuben,
+  cargarComposicion,
+  cargarPerfilCorporal,
   type UsuarioSupabase,
 } from '../services/supabase'
 import { useFitLogStore } from '../store/useFitLogStore'
@@ -193,6 +195,20 @@ export default function LoginPage() {
       } else if (!esRuben) {
         const nuevos = await crearEjerciciosDesdeTemplate(idSupabase)
         useFitLogStore.getState().importarEjercicios(nuevos)
+      }
+
+      // Cargar composición corporal para usuarios con acceso a esa sección
+      const puedePeso = esRuben ? true : (u.puede_peso_corporal ?? false)
+      if (puedePeso) {
+        try {
+          const [composicion, perfil] = await Promise.all([
+            cargarComposicion(idSupabase),
+            cargarPerfilCorporal(idSupabase),
+          ])
+          useFitLogStore.getState().importarComposicionYPerfil(composicion, perfil)
+        } catch {
+          console.warn('[Login] Sin conexión — composición no cargada')
+        }
       }
     } catch {
       console.warn('[Login] Sin conexión — usando datos locales cacheados')

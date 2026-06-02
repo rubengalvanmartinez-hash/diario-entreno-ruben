@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.7.5'
+export const APP_VERSION = '1.8.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,25 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.8.0',
+    fecha: '02/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'TAREA 1: Composición corporal persistida en Supabase (tablas composicion_corporal + perfil_corporal)',
+      'guardarComposicion / cargarComposicion / guardarPerfilCorporal / cargarPerfilCorporal en supabase.ts',
+      'PesoPage: handleRegistrar guarda en Supabase (fire-and-forget) además de en el store local',
+      'LoginPage: completarLogin carga composicion+perfil desde Supabase para usuarios con puede_peso_corporal',
+      'Nuevo store action importarComposicionYPerfil: reemplaza historialComposicion y perfilCorporal con datos remotos',
+      'TAREA 2: Tabla Personal Records editable en TendenciasPage',
+      'Filas de PR clickables con ChevronRight → abre PanelHistoricoSeries (overlay full-screen)',
+      'Panel muestra todas las sesiones del ejercicio con series (serie / reps / kg)',
+      'Toca cualquier valor → input inline de edición',
+      'Modal de confirmación antes de guardar cambios: aviso de impacto permanente en historial',
+      'actualizarSerieSupabase: UPDATE en tabla entrenos por (usuario_id, sesion_id, ejercicio, serie)',
+      'Nuevo store action editarSerieHistorial: edición optimista + revert automático si falla Supabase',
+    ],
+  },
   {
     version: '1.7.5',
     fecha: '02/06/2026',
