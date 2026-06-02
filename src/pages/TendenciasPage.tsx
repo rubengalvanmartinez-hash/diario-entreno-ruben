@@ -797,11 +797,17 @@ function PanelHistoricoSeries({
       const idActivo = getIdActivo()
       if (!idActivo) throw new Error('Sin usuario activo')
       const campoDB: 'reps' | 'peso_kg' = edit.campo === 'reps' ? 'reps' : 'peso_kg'
+      // Diagnóstico v1.8.2: log en consola del contexto que se va a enviar
+      console.log('[confirmarGuardar] idActivo:', idActivo, '| sesionId:', edit.sesionId,
+        '| ejNombre:', JSON.stringify(edit.ejNombre), '| serieNum:', edit.serieNum,
+        '| campo:', campoDB, '| valor:', nuevoValor)
       await actualizarSerieSupabase(idActivo, edit.sesionId, edit.ejNombre, edit.serieNum, campoDB, nuevoValor)
       setEdit(null)
-    } catch {
+    } catch (err) {
       editarSerieHistorial(edit.sesionId, edit.ejNombre, edit.serieNum, edit.campo, edit.valorOriginal)
-      setErrorMsg('Error al guardar. Cambio revertido.')
+      // Mostrar el error REAL de Supabase en pantalla (útil en iPhone sin DevTools)
+      const msg = err instanceof Error ? err.message : String(err)
+      setErrorMsg(`Fallo: ${msg}`)
     } finally {
       setGuardando(false)
     }
@@ -943,12 +949,15 @@ function PanelHistoricoSeries({
         </div>
       )}
 
-      {/* ── Error toast ── */}
+      {/* ── Error toast (muestra el error completo de Supabase) ── */}
       {errorMsg && (
-        <div className="absolute bottom-24 left-4 right-4 z-10 bg-red-900/95 border border-red-700
-                        rounded-xl px-4 py-2.5 flex items-center justify-between gap-2 shadow-xl">
-          <p className="text-xs text-red-200 font-medium">{errorMsg}</p>
-          <button onClick={() => setErrorMsg('')}><X size={14} className="text-red-400" /></button>
+        <div className="absolute bottom-24 left-2 right-2 z-10 bg-red-950 border border-red-700
+                        rounded-xl px-3 py-3 shadow-xl">
+          <div className="flex items-start justify-between gap-2 mb-1">
+            <p className="text-xs font-bold text-red-300">Error Supabase</p>
+            <button onClick={() => setErrorMsg('')} className="shrink-0"><X size={14} className="text-red-400" /></button>
+          </div>
+          <p className="text-[11px] text-red-200 leading-relaxed break-all font-mono">{errorMsg}</p>
         </div>
       )}
 

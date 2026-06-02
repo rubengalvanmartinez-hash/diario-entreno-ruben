@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.1'
+export const APP_VERSION = '1.8.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.8.2',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Diagnóstico actualizarSerieSupabase: SELECT previo al UPDATE para verificar cuántas filas coinciden',
+      'console.error con message/details/hint/code completo del error Supabase',
+      'Error real de Supabase visible en pantalla (toast monoespaciado) — sin necesitar DevTools en iPhone',
+      'serieNum forzado a entero con Math.round() antes del UPDATE',
+      'confirmarGuardar: log de idActivo + sesionId + ejNombre + campo antes de llamar a Supabase',
+    ],
+  },
   {
     version: '1.8.1',
     fecha: '02/06/2026',

@@ -698,6 +698,8 @@ export async function cargarPerfilCorporal(
 /**
  * Actualiza el valor de reps o peso_kg de una serie en el historial.
  * La clave compuesta (usuario_id, sesion_id, ejercicio, serie) identifica la fila.
+ *
+ * v1.8.2 — diagnóstico: imprime parámetros y error completo de Supabase.
  */
 export async function actualizarSerieSupabase(
   usuarioId: string,
@@ -707,12 +709,57 @@ export async function actualizarSerieSupabase(
   campo: 'reps' | 'peso_kg',
   valor: number,
 ): Promise<void> {
-  const { error } = await supabase
+  const serieInt = Math.round(serieNum) // asegurar entero (evitar float 1.0 vs 1)
+
+  // ── 1. Verificar qué filas existen con estos criterios ──────────────────────
+  const { data: filas, error: errSelect } = await supabase
+    .from('entrenos')
+    .select('id, usuario_id, sesion_id, ejercicio, serie, reps, peso_kg')
+    .eq('usuario_id', usuarioId)
+    .eq('sesion_id', sesionId)
+    .eq('ejercicio', ejercicioNombre)
+    .eq('serie', serieInt)
+
+  console.log('[actualizarSerie] Params:', {
+    usuarioId,
+    sesionId,
+    ejercicioNombre,
+    serieInt,
+    campo,
+    valor,
+  })
+  console.log('[actualizarSerie] Filas encontradas con SELECT:', filas?.length ?? 0, filas)
+  if (errSelect) {
+    console.error('[actualizarSerie] Error en SELECT diagnóstico:', errSelect)
+  }
+
+  // ── 2. Ejecutar el UPDATE ───────────────────────────────────────────────────
+  const { error, count } = await supabase
     .from('entrenos')
     .update({ [campo]: valor })
     .eq('usuario_id', usuarioId)
     .eq('sesion_id', sesionId)
     .eq('ejercicio', ejercicioNombre)
-    .eq('serie', serieNum)
-  if (error) throw error
+    .eq('serie', serieInt)
+    .select() // necesario para recibir count en Supabase v2
+
+  if (error) {
+    console.error('[actualizarSerie] ERROR Supabase:', {
+      message: error.message,
+      details: (error as { details?: string }).details,
+      hint:    (error as { hint?: string }).hint,
+      code:    (error as { code?: string }).code,
+    })
+    // Lanzar con mensaje legible para mostrarlo en pantalla
+    throw new Error(
+      `[${(error as { code?: string }).code ?? '?'}] ${error.message}` +
+      ((error as { hint?: string }).hint ? ` — ${(error as { hint?: string }).hint}` : ''),
+    )
+  }
+
+  console.log('[actualizarSerie] UPDATE OK — filas afectadas:', count)
+  if (count === 0) {
+    // No es error de Supabase, pero tampoco actualizó nada — la fila no existía
+    console.warn('[actualizarSerie] 0 filas actualizadas. Puede que la fila no exista en Supabase.')
+  }
 }
