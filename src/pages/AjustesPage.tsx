@@ -28,13 +28,14 @@ export default function AjustesPage() {
   const usuarioActivo = getUsuarioActivo()
   const esRuben = usuarioActivo?.esRuben ?? false
 
-  // Sync ejercicios a Supabase cuando cambian (solo amigos)
+  // Sync ejercicios a Supabase cuando cambian (todos los usuarios)
   const ejercicios = useFitLogStore(useShallow((s) => s.ejercicios))
   const syncMounted = useRef(false)
   useEffect(() => {
     if (!syncMounted.current) { syncMounted.current = true; return }
-    if (!usuarioActivo || esRuben) return
-    sincronizarEjerciciosUsuario(usuarioActivo.id, ejercicios).catch(console.error)
+    if (!usuarioActivo) return
+    const uid = esRuben ? getRubenUUID() : usuarioActivo.id
+    sincronizarEjerciciosUsuario(uid, ejercicios).catch(console.error)
   }, [ejercicios]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCambiarUsuario = () => {
