@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "WebFetch(domain:www.nutricionistasydietistas.com)",
+      "Bash(claude:*)",
+      "Bash(npm list:*)",
+      "Bash(npx vite:*)"
+    ]
+  }
+}
