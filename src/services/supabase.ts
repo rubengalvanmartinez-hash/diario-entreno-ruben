@@ -25,6 +25,34 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 // ---------------------------------------------------------------------------
+// Helper de paginación — Supabase limita a 1000 filas por defecto
+// ---------------------------------------------------------------------------
+
+/**
+ * Trae TODAS las filas de una consulta usando .range() en bloques de 1000.
+ * queryFn recibe (from, to) y debe devolver la misma consulta base con .range() aplicado.
+ * Lanza el error de Supabase si alguna página falla.
+ */
+async function fetchAllPages<T>(
+  queryFn: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  label = 'fetchAllPages',
+): Promise<T[]> {
+  const PAGE_SIZE = 1000
+  const result: T[] = []
+  let from = 0
+  while (true) {
+    const { data, error } = await queryFn(from, from + PAGE_SIZE - 1)
+    if (error) throw error
+    if (!data || data.length === 0) break
+    result.push(...(data as T[]))
+    if (data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  console.log(`[Supabase] ${label}: ${result.length} filas totales cargadas`)
+  return result
+}
+
+// ---------------------------------------------------------------------------
 // Tipos
 // ---------------------------------------------------------------------------
 
@@ -351,22 +379,28 @@ export interface DatosUsuarioCargados {
 }
 
 export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuarioCargados> {
-  const [{ data: entrenos, error: errEntrenos }, { data: pesos, error: errPesos }] =
-    await Promise.all([
-      supabase
-        .from('entrenos')
-        .select('*')
-        .eq('usuario_id', usuarioId)
-        .order('fecha', { ascending: false }),
-      supabase
-        .from('registros_peso')
-        .select('*')
-        .eq('usuario_id', usuarioId)
-        .order('fecha', { ascending: false }),
-    ])
-
-  if (errEntrenos) throw errEntrenos
-  if (errPesos) throw errPesos
+  const [entrenos, pesos] = await Promise.all([
+    fetchAllPages(
+      (from, to) =>
+        supabase
+          .from('entrenos')
+          .select('*')
+          .eq('usuario_id', usuarioId)
+          .order('fecha', { ascending: true })
+          .range(from, to),
+      `entrenos(${usuarioId.slice(0, 8)})`,
+    ),
+    fetchAllPages(
+      (from, to) =>
+        supabase
+          .from('registros_peso')
+          .select('*')
+          .eq('usuario_id', usuarioId)
+          .order('fecha', { ascending: true })
+          .range(from, to),
+      `registros_peso(${usuarioId.slice(0, 8)})`,
+    ),
+  ])
 
   // ── Reconstruir Sesion[] agrupando filas por sesion_id ───────────────────
   type SesionAccum = {
@@ -376,7 +410,7 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
   }
   const sesionMap = new Map<string, SesionAccum>()
 
-  for (const row of entrenos ?? []) {
+  for (const row of entrenos) {
     if (!sesionMap.has(row.sesion_id)) {
       sesionMap.set(row.sesion_id, { fecha: row.fecha, dia: row.dia, ejercicios: new Map() })
     }
@@ -428,7 +462,7 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
   sesiones.sort((a, b) => b.fecha.localeCompare(a.fecha))
 
   // ── Reconstruir RegistroPeso[] ────────────────────────────────────────────
-  const registrosPeso: RegistroPeso[] = (pesos ?? []).map((r) => ({
+  const registrosPeso: RegistroPeso[] = pesos.map((r) => ({
     id: String(r.id ?? ''),
     fecha: String(r.fecha ?? ''),
     pesoKg: Number(r.peso_kg),
@@ -633,13 +667,17 @@ export async function guardarComposicion(
 export async function cargarComposicion(
   usuarioId: string,
 ): Promise<RegistroComposicion[]> {
-  const { data, error } = await supabase
-    .from('composicion_corporal')
-    .select('*')
-    .eq('usuario_id', usuarioId)
-    .order('fecha', { ascending: false })
-  if (error) throw error
-  return (data ?? []).map((r) => ({
+  const data = await fetchAllPages(
+    (from, to) =>
+      supabase
+        .from('composicion_corporal')
+        .select('*')
+        .eq('usuario_id', usuarioId)
+        .order('fecha', { ascending: true })
+        .range(from, to),
+    `composicion_corporal(${usuarioId.slice(0, 8)})`,
+  )
+  return data.map((r) => ({
     id:           String(r.id),
     fecha:        String(r.fecha),
     pesoKg:       Number(r.peso_kg),

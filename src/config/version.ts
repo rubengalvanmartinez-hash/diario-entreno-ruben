@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.8.6'
+export const APP_VERSION = '1.8.7'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.8.7',
+    fecha: '02/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'BUG: Supabase limita a 1000 filas por defecto — solo aparecían entrenos desde dic 2025',
+      'Paginación con .range() en bloques de 1000 hasta agotar filas (fetchAllPages helper)',
+      'cargarDatosUsuario: entrenos y registros_peso paginados — trae las 1848 filas completas',
+      'cargarComposicion: composicion_corporal también paginada por si supera 1000 registros',
+      'console.log tras cada tabla con el total de filas cargadas para verificación',
+    ],
+  },
   {
     version: '1.8.6',
     fecha: '02/06/2026',
