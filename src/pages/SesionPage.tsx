@@ -6,7 +6,7 @@ import { obtenerImagen } from '../services/imageDB'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectProgresoTotal, selectProgresoCompletados } from '../store/useFitLogStore'
 import type { DiaId, SesionEjercicio, Serie } from '../types/models'
-import { getUsuarioActivo, sincronizarEntrenoSupabase, getRubenUUID, getPerfilVisto, getIdActivo } from '../services/supabase'
+import { getUsuarioActivo, sincronizarEntrenoSupabase, getRubenUUID, getPerfilVisto, getIdActivo, type UsuarioActivo } from '../services/supabase'
 import { pullHistorialInvitado } from '../hooks/useSupabaseSync'
 import { sincronizarSesion } from '../services/googleSheets'
 import { enqueueEjercicio, subscribeSyncStatus, type SyncStatus } from '../services/syncQueue'
@@ -180,7 +180,9 @@ export default function SesionPage() {
   const navigate           = useNavigate()
   const dia                = parseDiaParam(diaParam)
 
+  const [usuario]          = useState<UsuarioActivo | null>(() => getUsuarioActivo())
   const iniciarSesion      = useFitLogStore((s) => s.iniciarSesion)
+  const cambiarFecha       = useFitLogStore((s) => s.cambiarFechaSesionActiva)
   const sesionActiva       = useFitLogStore(useShallow((s) => s.sesionActiva))
   const indice             = useFitLogStore((s) => s.indiceEjercicioActual)
   const irAEjercicio       = useFitLogStore((s) => s.irAEjercicio)
@@ -348,6 +350,17 @@ export default function SesionPage() {
               </span>
             </div>
           </div>
+
+          {usuario?.esAdmin && sesionActiva && (
+            <input
+              type="date"
+              value={sesionActiva.fecha}
+              onChange={(e) => { if (e.target.value) cambiarFecha(e.target.value) }}
+              className="text-xs text-zinc-400 bg-transparent border border-zinc-700 rounded-lg px-1.5 py-1
+                         focus:outline-none focus:border-zinc-500 tabular-nums w-[112px] shrink-0"
+              title="Fecha de la sesión (solo admin)"
+            />
+          )}
 
           <SyncDot status={syncStatus} />
 

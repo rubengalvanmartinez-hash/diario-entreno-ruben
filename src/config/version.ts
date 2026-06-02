@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.0'
+export const APP_VERSION = '1.9.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.1',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Selector de fecha en cabecera de sesión — solo visible para admin',
+      'Fecha de hoy por defecto, modificable para crear sesiones de prueba en fechas pasadas',
+      'cambiarFechaSesionActiva en el store: actualiza sesionActiva.fecha en tiempo real',
+      'Para usuarios normales no admin: sin cambios, fecha automática como siempre',
+    ],
+  },
   {
     version: '1.9.0',
     fecha: '02/06/2026',

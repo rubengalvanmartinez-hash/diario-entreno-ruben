@@ -84,6 +84,8 @@ export interface FitLogActions {
   cancelarSesion: () => void
   /** Marca el ejercicio como saltado (no se sincroniza) y avanza al siguiente */
   saltarEjercicio: (indice: number) => void
+  /** Cambia la fecha de la sesión activa (solo admin) */
+  cambiarFechaSesionActiva: (fecha: string) => void
 
   // ── Series dentro de un ejercicio activo ───────────────────────────────
   actualizarSerie: (ejercicioIndice: number, serieIndex: number, cambio: Partial<Serie>) => void
@@ -391,6 +393,13 @@ export const useFitLogStore = create<FitLogStore>()(
             sesionActiva: { ...s.sesionActiva, ejercicios },
             indiceEjercicioActual: nuevoIndice,
           }
+        })
+      },
+
+      cambiarFechaSesionActiva(fecha) {
+        set((s) => {
+          if (!s.sesionActiva) return s
+          return { sesionActiva: { ...s.sesionActiva, fecha } }
         })
       },
 
