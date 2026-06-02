@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.4'
+export const APP_VERSION = '1.9.5'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.5',
+    fecha: '02/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'BUG: "vs sesión anterior = mismo volumen" — el pull de Supabase traía la sesión actual al historial antes del resumen',
+      'Fix: calcularProgresosVolumen excluye sesionActualId del historial al buscar sesiones previas',
+      'Drawer de ejercicios: botón "−" por ejercicio no completado para quitarlo temporalmente de la sesión',
+      'Drawer de ejercicios: botón "Añadir ejercicio" despliega selector con todos los ejercicios del usuario',
+      'Selector ordenado por nombre, muestra el día, filtra los ya incluidos en la sesión',
+      'agregarEjercicioASesion y quitarEjercicioDeSesion en el store (no tocan la plantilla del día)',
+    ],
+  },
   {
     version: '1.9.4',
     fecha: '02/06/2026',

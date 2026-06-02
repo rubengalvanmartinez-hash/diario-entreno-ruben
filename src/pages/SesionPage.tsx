@@ -190,10 +190,13 @@ export default function SesionPage() {
   const saltarEjercicio    = useFitLogStore((s) => s.saltarEjercicio)
   const completarSesion    = useFitLogStore((s) => s.completarSesion)
   const cancelarSesion     = useFitLogStore((s) => s.cancelarSesion)
+  const agregarEjercicioASesion = useFitLogStore((s) => s.agregarEjercicioASesion)
+  const quitarEjercicioDeSesion = useFitLogStore((s) => s.quitarEjercicioDeSesion)
   const progresoTotal      = useFitLogStore(selectProgresoTotal)
   const progresoCompletados = useFitLogStore(selectProgresoCompletados)
 
-  const historialSesiones = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const historialSesiones  = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const todosLosEjercicios = useFitLogStore(useShallow((s) => s.ejercicios))
   const [showLista,           setShowLista]           = useState(false)
   const [showCompletado,      setShowCompletado]      = useState(false)
   const [sesionCapturada,     setSesionCapturada]     = useState<Sesion | null>(null)
@@ -401,8 +404,11 @@ export default function SesionPage() {
       {showLista && (
         <ListaEjerciciosDrawer
           ejercicios={sesionActiva.ejercicios}
+          todosLosEjercicios={todosLosEjercicios}
           indiceActual={indice}
           onSeleccionar={(i) => { irAEjercicio(i); setShowLista(false) }}
+          onAgregar={(ejId) => agregarEjercicioASesion(ejId)}
+          onQuitar={(i) => quitarEjercicioDeSesion(i)}
           onCerrar={() => setShowLista(false)}
         />
       )}
@@ -1203,39 +1209,54 @@ function PillEtiqueta({
 
 // ── ListaEjerciciosDrawer ─────────────────────────────────────────────────────
 
+import type { Ejercicio } from '../types/models'
+
 function ListaEjerciciosDrawer({
-  ejercicios, indiceActual, onSeleccionar, onCerrar,
+  ejercicios, todosLosEjercicios, indiceActual, onSeleccionar, onAgregar, onQuitar, onCerrar,
 }: {
   ejercicios: SesionEjercicio[]
+  todosLosEjercicios: Ejercicio[]
   indiceActual: number
   onSeleccionar: (i: number) => void
+  onAgregar: (ejercicioId: string) => void
+  onQuitar: (indice: number) => void
   onCerrar: () => void
 }) {
+  const [showSelector, setShowSelector] = useState(false)
+
+  // IDs ya en la sesión (para evitar duplicados en el selector)
+  const idsEnSesion = new Set(ejercicios.map((e) => e.ejercicioId))
+
+  const handleAgregar = (ejId: string) => {
+    onAgregar(ejId)
+    setShowSelector(false)
+  }
+
   return (
     <>
-      <div
-        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-        onClick={onCerrar}
-      />
+      <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onCerrar} />
       <div className="fixed bottom-16 inset-x-0 z-50 bg-zinc-900 border-t border-zinc-700 rounded-t-3xl
-                      max-h-[70svh] overflow-y-auto animate-in slide-in-from-bottom duration-200">
-        <div className="sticky top-0 bg-zinc-900 flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+                      max-h-[75svh] flex flex-col animate-in slide-in-from-bottom duration-200">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
           <h3 className="font-bold text-white text-base">Ejercicios de la sesión</h3>
           <button onClick={onCerrar} className="text-zinc-400 text-sm font-medium active:text-white">
             Cerrar
           </button>
         </div>
 
-        <ul className="py-2">
+        {/* Lista de ejercicios */}
+        <ul className="flex-1 overflow-y-auto py-2">
           {ejercicios.map((ej, i) => {
-            const nombre  = ej.nombreSustituido ?? ej.nombreSnapshot
+            const nombre   = ej.nombreSustituido ?? ej.nombreSnapshot
             const esActual = i === indiceActual
             return (
-              <li key={i}>
+              <li key={i} className="flex items-center gap-1 pr-3">
                 <button
                   onClick={() => onSeleccionar(i)}
                   className={[
-                    'w-full flex items-center gap-4 px-5 py-4 text-left active:bg-zinc-800',
+                    'flex-1 flex items-center gap-4 pl-5 py-4 text-left active:bg-zinc-800',
                     esActual ? 'bg-blue-500/10' : '',
                   ].join(' ')}
                 >
@@ -1262,10 +1283,59 @@ function ListaEjerciciosDrawer({
                     </span>
                   )}
                 </button>
+                {/* Botón quitar (−) — no se muestra si ya está completado */}
+                {!ej.completado && (
+                  <button
+                    onClick={() => onQuitar(i)}
+                    className="size-8 flex items-center justify-center rounded-full bg-zinc-800 text-zinc-500
+                               active:bg-red-900/60 active:text-red-400 shrink-0"
+                    title="Quitar de esta sesión"
+                  >
+                    <Minus size={14} />
+                  </button>
+                )}
               </li>
             )
           })}
         </ul>
+
+        {/* Botón añadir ejercicio */}
+        <div className="px-5 py-3 border-t border-zinc-800 shrink-0">
+          <button
+            onClick={() => setShowSelector((v) => !v)}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl border border-dashed
+                       border-zinc-600 py-3 text-sm font-semibold text-zinc-400 active:bg-zinc-800"
+          >
+            <Plus size={16} />
+            Añadir ejercicio a esta sesión
+          </button>
+        </div>
+
+        {/* Selector de ejercicios para añadir */}
+        {showSelector && (
+          <div className="border-t border-zinc-800 max-h-52 overflow-y-auto shrink-0">
+            <p className="px-5 py-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+              Elige un ejercicio
+            </p>
+            {todosLosEjercicios
+              .filter((e) => !idsEnSesion.has(e.id))
+              .sort((a, b) => a.nombre.localeCompare(b.nombre))
+              .map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => handleAgregar(e.id)}
+                  className="w-full flex items-center gap-3 px-5 py-3 text-left active:bg-zinc-800 border-b border-zinc-800/50"
+                >
+                  <Plus size={14} className="text-emerald-400 shrink-0" />
+                  <span className="text-sm text-white">{e.nombre}</span>
+                  <span className="text-xs text-zinc-600 ml-auto shrink-0">Día {e.dia}</span>
+                </button>
+              ))}
+            {todosLosEjercicios.filter((e) => !idsEnSesion.has(e.id)).length === 0 && (
+              <p className="px-5 py-3 text-sm text-zinc-600">Todos los ejercicios ya están en la sesión.</p>
+            )}
+          </div>
+        )}
       </div>
     </>
   )
@@ -1337,12 +1407,13 @@ interface ProgresoEjercicio {
 /**
  * Para cada ejercicio completado, calcula el volumen y lo compara con
  * (a) la sesión anterior y (b) la media de las últimas 4.
- * Devuelve solo ejercicios donde al menos una comparación tiene cambio real.
- * Cuando el ejercicio aparece, SIEMPRE se incluyen AMBAS comparaciones con datos.
+ * sesionActualId se usa para EXCLUIR la sesión recién completada del historial
+ * (puede estar ahí si el pull de Supabase la trajo antes de que se muestre el resumen).
  */
 function calcularProgresosVolumen(
   completados: SesionEjercicio[],
   historialOrdenado: Sesion[],
+  sesionActualId: string,
 ): ProgresoEjercicio[] {
   const resultado: ProgresoEjercicio[] = []
   for (const ej of completados) {
@@ -1350,9 +1421,10 @@ function calcularProgresosVolumen(
     if (volActual <= 0) continue
     const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
 
-    // Hasta 4 sesiones previas con volumen > 0
+    // Hasta 4 sesiones previas con volumen > 0 — excluir la sesión actual
     const volPrevios: number[] = []
     for (const ses of historialOrdenado) {
+      if (ses.id === sesionActualId) continue   // ← excluir sesión recién completada
       const ejPrev = ses.ejercicios.find(
         (e) =>
           (e.nombreSnapshot === ej.nombreSnapshot || e.ejercicioId === ej.ejercicioId) &&
@@ -1568,7 +1640,7 @@ function ResumenSesion({
   )
 
   const progresos = useMemo(
-    () => calcularProgresosVolumen(completados, historialOrdenado),
+    () => calcularProgresosVolumen(completados, historialOrdenado, sesion.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sesion.id, historialPrevio],
   )

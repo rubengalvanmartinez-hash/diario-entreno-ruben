@@ -86,6 +86,10 @@ export interface FitLogActions {
   saltarEjercicio: (indice: number) => void
   /** Cambia la fecha de la sesión activa (solo admin) */
   cambiarFechaSesionActiva: (fecha: string) => void
+  /** Añade un ejercicio a la sesión activa (temporal, no toca la plantilla) */
+  agregarEjercicioASesion: (ejercicioId: string) => void
+  /** Quita el ejercicio en la posición dada de la sesión activa (temporal) */
+  quitarEjercicioDeSesion: (indice: number) => void
 
   // ── Series dentro de un ejercicio activo ───────────────────────────────
   actualizarSerie: (ejercicioIndice: number, serieIndex: number, cambio: Partial<Serie>) => void
@@ -400,6 +404,34 @@ export const useFitLogStore = create<FitLogStore>()(
         set((s) => {
           if (!s.sesionActiva) return s
           return { sesionActiva: { ...s.sesionActiva, fecha } }
+        })
+      },
+
+      agregarEjercicioASesion(ejercicioId) {
+        set((s) => {
+          if (!s.sesionActiva) return s
+          const ejercicio = s.ejercicios.find((e) => e.id === ejercicioId)
+          if (!ejercicio) return s
+          const nuevo = crearSesionEjercicio(ejercicio)
+          return {
+            sesionActiva: {
+              ...s.sesionActiva,
+              ejercicios: [...s.sesionActiva.ejercicios, nuevo],
+            },
+          }
+        })
+      },
+
+      quitarEjercicioDeSesion(indice) {
+        set((s) => {
+          if (!s.sesionActiva) return s
+          const ejercicios = s.sesionActiva.ejercicios.filter((_, i) => i !== indice)
+          // Si el índice actual queda fuera de rango, ajustar
+          const nuevoIndice = Math.min(s.indiceEjercicioActual, Math.max(0, ejercicios.length - 1))
+          return {
+            sesionActiva: { ...s.sesionActiva, ejercicios },
+            indiceEjercicioActual: nuevoIndice,
+          }
         })
       },
 
