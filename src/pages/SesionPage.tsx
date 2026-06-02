@@ -206,6 +206,11 @@ export default function SesionPage() {
   }, [])
 
   useEffect(() => {
+    console.log('[SesionPage] usuario activo:', usuario)
+    console.log('[SesionPage] esAdmin:', usuario?.esAdmin)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (!dia) return
     if (dia === 'parcial' || dia === 'extra') {
       if (!sesionActiva || sesionActiva.dia !== dia) {
@@ -351,17 +356,6 @@ export default function SesionPage() {
             </div>
           </div>
 
-          {usuario?.esAdmin && sesionActiva && (
-            <input
-              type="date"
-              value={sesionActiva.fecha}
-              onChange={(e) => { if (e.target.value) cambiarFecha(e.target.value) }}
-              className="text-xs text-zinc-400 bg-transparent border border-zinc-700 rounded-lg px-1.5 py-1
-                         focus:outline-none focus:border-zinc-500 tabular-nums w-[112px] shrink-0"
-              title="Fecha de la sesión (solo admin)"
-            />
-          )}
-
           <SyncDot status={syncStatus} />
 
           <button
@@ -373,6 +367,20 @@ export default function SesionPage() {
           </button>
         </div>
       </header>
+
+      {/* ── Fecha de sesión (solo admin) ── */}
+      {usuario?.esAdmin && sesionActiva && (
+        <div className="bg-amber-950/40 border-b border-amber-800/40 px-5 py-2.5 flex items-center gap-3">
+          <span className="text-xs font-semibold text-amber-400 shrink-0">📅 Fecha de la sesión:</span>
+          <input
+            type="date"
+            value={sesionActiva.fecha}
+            onChange={(e) => { if (e.target.value) cambiarFecha(e.target.value) }}
+            className="bg-zinc-800 border border-amber-700/50 rounded-lg px-2 py-1 text-sm text-white
+                       focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+      )}
 
       {/* ── Ejercicio actual ── */}
       <div className="flex-1 overflow-y-auto">

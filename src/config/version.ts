@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.9.1'
+export const APP_VERSION = '1.9.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,16 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '1.9.2',
+    fecha: '02/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Selector de fecha admin movido a banda visible entre cabecera y ejercicio (antes estaba apretujado en la cabecera)',
+      'Fondo ámbar para distinguirlo claramente como función de admin',
+      'console.log al montar: muestra usuario activo y valor de esAdmin para diagnóstico',
+    ],
+  },
   {
     version: '1.9.1',
     fecha: '02/06/2026',
