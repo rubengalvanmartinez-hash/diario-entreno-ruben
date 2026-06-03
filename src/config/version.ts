@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.0.2'
+export const APP_VERSION = '2.0.3'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,20 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.0.3',
+    fecha: '03/06/2026',
+    tipo: 'media',
+    cambios: [
+      'Nueva sección "Exportar para IA" en Ajustes',
+      'Selector de periodo: Todo, 1 año, 6 meses, 3 meses, 1 mes',
+      'Botón "Copiar para IA": copia texto estructurado al portapapeles — listo para ChatGPT, Claude, etc.',
+      'Botón "Descargar JSON": descarga archivo .json con todos los datos del periodo',
+      'Exporta: perfil, sesiones con series y etiquetas, volumen por ejercicio, peso corporal, composición y récords personales',
+      'Encabezado de contexto para que la IA entienda qué son los datos',
+      'Resumen final: total sesiones, volumen del periodo, tendencia de peso corporal',
+    ],
+  },
   {
     version: '2.0.2',
     fecha: '03/06/2026',

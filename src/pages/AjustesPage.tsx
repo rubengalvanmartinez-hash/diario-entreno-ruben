@@ -104,6 +104,11 @@ export default function AjustesPage() {
       )}
 
       <section className="flex flex-col gap-3">
+        <SectionLabel>Exportar para IA</SectionLabel>
+        <SeccionExportarIA />
+      </section>
+
+      <section className="flex flex-col gap-3">
         <SectionLabel>Diagnóstico de datos</SectionLabel>
         <SeccionDiagnostico />
         <SeccionBackupRestore />
@@ -1292,6 +1297,318 @@ function SeccionBackupRestore() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── SeccionExportarIA ─────────────────────────────────────────────────────────
+
+type PeriodoIA = 'todo' | '1a' | '6m' | '3m' | '1m'
+
+const PERIODOS_IA: { id: PeriodoIA; label: string }[] = [
+  { id: 'todo', label: 'Todo' },
+  { id: '1a',   label: '1 año' },
+  { id: '6m',   label: '6 meses' },
+  { id: '3m',   label: '3 meses' },
+  { id: '1m',   label: '1 mes' },
+]
+
+function epley1RM(peso: number, reps: number): number {
+  return reps <= 1 ? peso : peso * (1 + reps / 30)
+}
+
+function fmtFechaIA(iso: string): string {
+  const [a, m, d] = iso.split('-')
+  return `${d}/${m}/${a}`
+}
+
+function SeccionExportarIA() {
+  const historialSesiones    = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const registrosPeso        = useFitLogStore(useShallow((s) => s.registrosPeso))
+  const historialComposicion = useFitLogStore(useShallow((s) => s.historialComposicion))
+  const perfilCorporal       = useFitLogStore((s) => s.perfilCorporal)
+  const usuarioActivo        = getUsuarioActivo()
+
+  const [periodo, setPeriodo] = useState<PeriodoIA>('todo')
+  const [copiado, setCopiado] = useState(false)
+
+  const fechaCorte = useMemo((): string | null => {
+    if (periodo === 'todo') return null
+    const hoy   = new Date()
+    const meses = periodo === '1a' ? 12 : periodo === '6m' ? 6 : periodo === '3m' ? 3 : 1
+    hoy.setMonth(hoy.getMonth() - meses)
+    return hoy.toISOString().slice(0, 10)
+  }, [periodo])
+
+  const sesionesFiltradas = useMemo(() =>
+    historialSesiones
+      .filter((s) => !fechaCorte || s.fecha >= fechaCorte)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    [historialSesiones, fechaCorte])
+
+  const pesosFiltrados = useMemo(() =>
+    registrosPeso
+      .filter((r) => !fechaCorte || r.fecha >= fechaCorte)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    [registrosPeso, fechaCorte])
+
+  const composicionFiltrada = useMemo(() =>
+    historialComposicion
+      .filter((c) => !fechaCorte || c.fecha >= fechaCorte)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    [historialComposicion, fechaCorte])
+
+  // Récords sobre todo el historial (no solo el periodo filtrado)
+  const records = useMemo(() => {
+    const map: Record<string, { peso: number; reps: number; rm1: number; fecha: string }> = {}
+    for (const ses of historialSesiones) {
+      for (const ej of ses.ejercicios) {
+        if (!ej.completado || ej.saltado) continue
+        const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
+        for (const sr of ej.series) {
+          const p = Number(sr.pesoKg), r = Number(sr.reps)
+          if (!p || !r) continue
+          const rm1 = epley1RM(p, r)
+          const prev = map[nombre]
+          if (!prev || rm1 > prev.rm1) map[nombre] = { peso: p, reps: r, rm1, fecha: ses.fecha }
+        }
+      }
+    }
+    return map
+  }, [historialSesiones])
+
+  const volTotal = useMemo(() =>
+    sesionesFiltradas.reduce((acc, ses) =>
+      acc + ses.ejercicios
+        .filter((e) => e.completado && !e.saltado)
+        .reduce((a, ej) =>
+          a + ej.series.reduce((s, sr) => {
+            const r = Number(sr.reps), p = Number(sr.pesoKg)
+            return s + (r && p ? r * p : 0)
+          }, 0), 0), 0),
+    [sesionesFiltradas])
+
+  const generarTexto = (): string => {
+    const nombre      = usuarioActivo?.nombre ?? 'Usuario'
+    const periodoLabel = PERIODOS_IA.find((p) => p.id === periodo)?.label ?? 'Todo'
+    const lines: string[] = []
+
+    lines.push('=== DATOS DE ENTRENAMIENTO DE FUERZA PARA ANÁLISIS ===')
+    lines.push(`Usuario: ${nombre}`)
+    lines.push(`Periodo exportado: ${periodoLabel}`)
+    lines.push(`Fecha de exportación: ${new Date().toLocaleDateString('es-ES')}`)
+    lines.push('Propósito: análisis de progreso, evolución de cargas y tendencias de rendimiento.')
+    lines.push('')
+
+    // Perfil
+    if (perfilCorporal?.edad || perfilCorporal?.alturaCm || perfilCorporal?.sexo) {
+      lines.push('--- PERFIL ---')
+      if (perfilCorporal.edad)     lines.push(`Edad: ${perfilCorporal.edad} años`)
+      if (perfilCorporal.alturaCm) lines.push(`Altura: ${perfilCorporal.alturaCm} cm`)
+      if (perfilCorporal.sexo)     lines.push(`Sexo: ${perfilCorporal.sexo}`)
+      lines.push('')
+    }
+
+    // Sesiones
+    lines.push(`--- SESIONES DE ENTRENAMIENTO (${sesionesFiltradas.length} total) ---`)
+    for (const ses of sesionesFiltradas) {
+      const diaLabel = ses.dia === 'parcial' ? 'Parcial'
+                     : ses.dia === 'extra'   ? 'Extra'
+                     : `Día ${ses.dia}`
+      const ejsActivos = ses.ejercicios.filter((e) => e.completado && !e.saltado)
+      if (ejsActivos.length === 0) continue
+      lines.push('')
+      lines.push(`[${fmtFechaIA(ses.fecha)}] ${diaLabel}`)
+      let volSesion = 0
+      for (const ej of ejsActivos) {
+        const ejNombre = ej.nombreSustituido ?? ej.nombreSnapshot
+        const seriesConDatos = ej.series.filter((s) => s.reps !== '' && s.pesoKg !== '')
+        const seriesStr = seriesConDatos.map((s) => {
+          const et = s.etiqueta === 'fallo' ? ' [Fallo]'
+                   : s.etiqueta === 'rir0'  ? ' [RIR0]'
+                   : s.etiqueta === 'rir1'  ? ' [RIR1]' : ''
+          return `${s.reps}r×${s.pesoKg}kg${et}`
+        }).join(' | ')
+        const volEj = ej.series.reduce((acc, s) => {
+          const r = Number(s.reps), p = Number(s.pesoKg)
+          return acc + (r && p ? r * p : 0)
+        }, 0)
+        volSesion += volEj
+        lines.push(`  ${ejNombre}: ${seriesStr || '—'} (vol: ${Math.round(volEj)} kg)`)
+      }
+      lines.push(`  → Volumen sesión: ${Math.round(volSesion)} kg`)
+    }
+    lines.push('')
+
+    // Récords personales
+    const recs = Object.entries(records).sort((a, b) => a[0].localeCompare(b[0]))
+    if (recs.length > 0) {
+      lines.push('--- RÉCORDS PERSONALES (histórico completo) ---')
+      for (const [ejNombre, r] of recs) {
+        lines.push(`  ${ejNombre}: ${r.peso}kg×${r.reps}r  (1RM est.: ${Math.round(r.rm1)} kg) — ${fmtFechaIA(r.fecha)}`)
+      }
+      lines.push('')
+    }
+
+    // Peso corporal
+    if (pesosFiltrados.length > 0) {
+      lines.push(`--- REGISTROS DE PESO CORPORAL (${pesosFiltrados.length} total) ---`)
+      for (const r of pesosFiltrados) {
+        lines.push(`  ${fmtFechaIA(r.fecha)}: ${r.pesoKg} kg`)
+      }
+      if (pesosFiltrados.length >= 2) {
+        const diff = pesosFiltrados[pesosFiltrados.length - 1].pesoKg - pesosFiltrados[0].pesoKg
+        lines.push(`  Tendencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(1)} kg en el periodo`)
+      }
+      lines.push('')
+    }
+
+    // Composición corporal
+    if (composicionFiltrada.length > 0) {
+      lines.push('--- COMPOSICIÓN CORPORAL ---')
+      for (const c of composicionFiltrada) {
+        lines.push(`  ${fmtFechaIA(c.fecha)}: ${c.pesoKg} kg | IMC: ${c.imc.toFixed(1)} (${c.categoriaImc}) | Grasa: ${c.pctGrasa.toFixed(1)}% | Músculo: ${c.pctMusculo.toFixed(1)}%`)
+      }
+      lines.push('')
+    }
+
+    // Resumen final
+    lines.push('--- RESUMEN DEL PERIODO ---')
+    lines.push(`Total de sesiones: ${sesionesFiltradas.length}`)
+    lines.push(`Volumen total del periodo: ${Math.round(volTotal).toLocaleString('es-ES')} kg`)
+    if (pesosFiltrados.length >= 2) {
+      const p0   = pesosFiltrados[0].pesoKg
+      const pN   = pesosFiltrados[pesosFiltrados.length - 1].pesoKg
+      const diff = pN - p0
+      lines.push(`Evolución de peso corporal: de ${p0} kg a ${pN} kg (${diff >= 0 ? '+' : ''}${diff.toFixed(1)} kg)`)
+    }
+    lines.push('')
+    lines.push('=== FIN DE DATOS ===')
+
+    return lines.join('\n')
+  }
+
+  const generarJSON = () => ({
+    exportVersion: '1.0',
+    exportDate:    new Date().toISOString(),
+    usuario:       usuarioActivo?.nombre ?? 'Usuario',
+    periodo:       PERIODOS_IA.find((p) => p.id === periodo)?.label,
+    perfil:        perfilCorporal,
+    sesiones: sesionesFiltradas.map((ses) => ({
+      id:    ses.id,
+      fecha: ses.fecha,
+      dia:   ses.dia,
+      ejercicios: ses.ejercicios
+        .filter((e) => e.completado && !e.saltado)
+        .map((ej) => {
+          const volEj = ej.series.reduce((acc, s) => {
+            const r = Number(s.reps), p = Number(s.pesoKg)
+            return acc + (r && p ? r * p : 0)
+          }, 0)
+          return {
+            nombre:  ej.nombreSustituido ?? ej.nombreSnapshot,
+            series:  ej.series.filter((s) => s.reps !== '' && s.pesoKg !== '').map((s) => ({
+              numero:   s.numero,
+              reps:     s.reps,
+              pesoKg:   s.pesoKg,
+              etiqueta: s.etiqueta ?? null,
+            })),
+            volumenKg: Math.round(volEj),
+          }
+        }),
+      volumenTotalKg: Math.round(
+        ses.ejercicios.filter((e) => e.completado && !e.saltado).reduce((acc, ej) =>
+          acc + ej.series.reduce((s, sr) => {
+            const r = Number(sr.reps), p = Number(sr.pesoKg)
+            return s + (r && p ? r * p : 0)
+          }, 0), 0)
+      ),
+    })),
+    registrosPeso:      pesosFiltrados,
+    composicionCorporal: composicionFiltrada,
+    recordsPersonales:   Object.entries(records)
+      .map(([ejNombre, r]) => ({
+        ejercicio:     ejNombre,
+        mejorPeso:     r.peso,
+        mejorReps:     r.reps,
+        rm1Estimado:   Math.round(r.rm1),
+        fecha:         r.fecha,
+      }))
+      .sort((a, b) => a.ejercicio.localeCompare(b.ejercicio)),
+  })
+
+  const handleCopiar = async () => {
+    try {
+      await navigator.clipboard.writeText(generarTexto())
+      setCopiado(true)
+      setTimeout(() => setCopiado(false), 2500)
+    } catch { /* clipboard no disponible */ }
+  }
+
+  const handleDescargarJSON = () => {
+    const now  = new Date()
+    const dd   = String(now.getDate()).padStart(2, '0')
+    const mm   = String(now.getMonth() + 1).padStart(2, '0')
+    const aaaa = String(now.getFullYear())
+    const blob = new Blob([JSON.stringify(generarJSON(), null, 2)], { type: 'application/json' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `fitlog_ia_${dd}${mm}${aaaa}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-4">
+      <p className="text-xs text-zinc-400 leading-relaxed">
+        Exporta tus datos listos para pegar en ChatGPT, Claude u otras IAs y que analicen tu progreso.
+      </p>
+
+      {/* Selector de periodo */}
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Periodo</p>
+        <div className="flex gap-2 flex-wrap">
+          {PERIODOS_IA.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setPeriodo(id)}
+              className={[
+                'px-3.5 py-2 rounded-xl text-sm font-bold transition-colors',
+                periodo === id
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-zinc-800 text-zinc-400 active:bg-zinc-700',
+              ].join(' ')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-zinc-600">
+          {sesionesFiltradas.length} sesión{sesionesFiltradas.length !== 1 ? 'es' : ''}
+          {pesosFiltrados.length > 0 ? ` · ${pesosFiltrados.length} registros de peso` : ''}
+        </p>
+      </div>
+
+      {/* Botones */}
+      <div className="flex flex-col gap-2">
+        <button
+          onClick={handleCopiar}
+          className={[
+            'w-full flex items-center justify-center gap-2 rounded-2xl py-3.5 font-bold text-sm transition-colors',
+            copiado ? 'bg-green-600 text-white' : 'bg-blue-600 text-white active:bg-blue-700',
+          ].join(' ')}
+        >
+          {copiado ? '✅ Copiado' : '🤖 Copiar para IA'}
+        </button>
+        <button
+          onClick={handleDescargarJSON}
+          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-zinc-800
+                     py-3.5 text-sm font-bold text-zinc-200 active:bg-zinc-700 transition-colors"
+        >
+          📥 Descargar JSON
+        </button>
+      </div>
     </div>
   )
 }
