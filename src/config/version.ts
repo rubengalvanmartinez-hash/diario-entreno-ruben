@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.1.0'
+export const APP_VERSION = '2.1.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.1.1',
+    fecha: '04/06/2026',
+    tipo: 'media',
+    cambios: [
+      'Medidas corporales: selector de fecha en la cabecera — permite cargar y guardar medidas de días anteriores',
+      'Medidas corporales: botón eliminar por registro en el historial con confirmación (Sí / No)',
+      'Exportar para IA: incluye sección "MEDIDAS CORPORALES" con los 13 perímetros del periodo seleccionado',
+      'Exportar para IA: JSON incluye campo medidasCorporales junto a composicionCorporal',
+      'Exportar para IA: estadísticas del pie muestran el recuento de medidas del periodo',
+    ],
+  },
   {
     version: '2.1.0',
     fecha: '04/06/2026',

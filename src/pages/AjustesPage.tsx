@@ -1331,6 +1331,7 @@ function SeccionExportarIA() {
   const historialSesiones    = useFitLogStore(useShallow((s) => s.historialSesiones))
   const registrosPeso        = useFitLogStore(useShallow((s) => s.registrosPeso))
   const historialComposicion = useFitLogStore(useShallow((s) => s.historialComposicion))
+  const historialMedidas     = useFitLogStore(useShallow((s) => s.historialMedidas))
   const perfilCorporal       = useFitLogStore((s) => s.perfilCorporal)
   const usuarioActivo        = getUsuarioActivo()
 
@@ -1362,6 +1363,12 @@ function SeccionExportarIA() {
       .filter((c) => !fechaCorte || c.fecha >= fechaCorte)
       .sort((a, b) => a.fecha.localeCompare(b.fecha)),
     [historialComposicion, fechaCorte])
+
+  const medidasFiltradas = useMemo(() =>
+    historialMedidas
+      .filter((m) => !fechaCorte || m.fecha >= fechaCorte)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    [historialMedidas, fechaCorte])
 
   // Récords sobre todo el historial (no solo el periodo filtrado)
   const records = useMemo(() => {
@@ -1477,6 +1484,29 @@ function SeccionExportarIA() {
       lines.push('')
     }
 
+    // Medidas corporales
+    if (medidasFiltradas.length > 0) {
+      lines.push(`--- MEDIDAS CORPORALES (${medidasFiltradas.length} total) ---`)
+      for (const m of medidasFiltradas) {
+        const partes: string[] = []
+        if (m.cuello)          partes.push(`Cuello: ${m.cuello}`)
+        if (m.hombro)          partes.push(`Hombro: ${m.hombro}`)
+        if (m.pecho)           partes.push(`Pecho: ${m.pecho}`)
+        if (m.bicepsIzq)       partes.push(`Bíceps Izq: ${m.bicepsIzq}`)
+        if (m.bicepsDer)       partes.push(`Bíceps Der: ${m.bicepsDer}`)
+        if (m.cinturaAlta)     partes.push(`Cintura alta: ${m.cinturaAlta}`)
+        if (m.cinturaBaja)     partes.push(`Cintura baja: ${m.cinturaBaja}`)
+        if (m.abdomen)         partes.push(`Abdomen: ${m.abdomen}`)
+        if (m.cadera)          partes.push(`Cadera: ${m.cadera}`)
+        if (m.musloIzq)        partes.push(`Muslo Izq: ${m.musloIzq}`)
+        if (m.musloDer)        partes.push(`Muslo Der: ${m.musloDer}`)
+        if (m.pantorrillaIzq)  partes.push(`Pantorrilla Izq: ${m.pantorrillaIzq}`)
+        if (m.pantorrillaDer)  partes.push(`Pantorrilla Der: ${m.pantorrillaDer}`)
+        lines.push(`  ${fmtFechaIA(m.fecha)}: ${partes.join(' | ')} (cm)`)
+      }
+      lines.push('')
+    }
+
     // Resumen final
     lines.push('--- RESUMEN DEL PERIODO ---')
     lines.push(`Total de sesiones: ${sesionesFiltradas.length}`)
@@ -1529,8 +1559,9 @@ function SeccionExportarIA() {
           }, 0), 0)
       ),
     })),
-    registrosPeso:      pesosFiltrados,
+    registrosPeso:       pesosFiltrados,
     composicionCorporal: composicionFiltrada,
+    medidasCorporales:   medidasFiltradas,
     recordsPersonales:   Object.entries(records)
       .map(([ejNombre, r]) => ({
         ejercicio:     ejNombre,
@@ -1592,6 +1623,7 @@ function SeccionExportarIA() {
         <p className="text-xs text-zinc-600">
           {sesionesFiltradas.length} sesión{sesionesFiltradas.length !== 1 ? 'es' : ''}
           {pesosFiltrados.length > 0 ? ` · ${pesosFiltrados.length} registros de peso` : ''}
+          {medidasFiltradas.length > 0 ? ` · ${medidasFiltradas.length} medidas` : ''}
         </p>
       </div>
 
