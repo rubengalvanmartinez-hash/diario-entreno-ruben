@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.1.3'
+export const APP_VERSION = '2.1.4'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,14 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.1.4',
+    fecha: '04/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Fix deploy: eliminarMedidasSupabase y eliminarMedidasLocales no estaban commiteadas — Netlify fallaba con TS2305/TS2339',
+    ],
+  },
   {
     version: '2.1.3',
     fecha: '04/06/2026',

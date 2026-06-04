@@ -108,6 +108,7 @@ export interface FitLogActions {
   // ── Medidas corporales ────────────────────────────────────────────────
   guardarMedidasLocales: (datos: Omit<RegistroMedidas, 'id'>) => void
   importarMedidas: (historial: RegistroMedidas[]) => void
+  eliminarMedidasLocales: (id: string) => void
 
   // ── Configuración de ejercicios ────────────────────────────────────────
   agregarEjercicio: (datos: Omit<Ejercicio, 'id' | 'orden'>) => void
@@ -521,6 +522,10 @@ export const useFitLogStore = create<FitLogStore>()(
 
       importarMedidas(historial) {
         set({ historialMedidas: historial })
+      },
+
+      eliminarMedidasLocales(id) {
+        set((s) => ({ historialMedidas: s.historialMedidas.filter((m) => m.id !== id) }))
       },
 
       // ── Ejercicios (configuración) ─────────────────────────────────────

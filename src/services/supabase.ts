@@ -766,6 +766,19 @@ export async function guardarMedidas(
   if (error) throw error
 }
 
+/** Elimina un registro de medidas por su id. */
+export async function eliminarMedidasSupabase(
+  usuarioId: string,
+  id: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('medidas_corporales')
+    .delete()
+    .eq('usuario_id', usuarioId)
+    .eq('id', id)
+  if (error) throw error
+}
+
 /** Carga el historial de medidas corporales de un usuario desde Supabase. */
 export async function cargarMedidas(
   usuarioId: string,
