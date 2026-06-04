@@ -1893,10 +1893,13 @@ function SeccionBorrarCache() {
         const registros = await navigator.serviceWorker.getRegistrations()
         await Promise.all(registros.map((r) => r.unregister()))
       }
-    } finally {
-      // 3. Recargar forzando red (sin caché)
-      window.location.reload()
-    }
+    } catch { /* ignorar errores — recargar igualmente */ }
+    // 3. Recargar con URL anti-caché:
+    //    location.reload() no fuerza red en Safari iOS.
+    //    Cambiar la URL con ?t=timestamp garantiza un GET real al servidor,
+    //    descargando index.html fresco y activando el SW nuevo.
+    const { origin, pathname } = window.location
+    window.location.href = origin + pathname + '?t=' + Date.now()
   }
 
   if (confirmando) {

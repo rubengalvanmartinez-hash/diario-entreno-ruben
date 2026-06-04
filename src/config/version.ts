@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.1.2'
+export const APP_VERSION = '2.1.3'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,15 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.1.3',
+    fecha: '04/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: "Borrar caché y reiniciar" no actualizaba la versión en Safari iOS',
+      'Fix: reemplazado location.reload() por location.href con parámetro ?t=timestamp — fuerza GET real al servidor en todos los navegadores incluyendo Safari iOS',
+    ],
+  },
   {
     version: '2.1.2',
     fecha: '04/06/2026',
