@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Dumbbell, Scale, AlertCircle, RefreshCw, Users, ChevronDown } from 'lucide-react'
+import { Dumbbell, Scale, Ruler, AlertCircle, RefreshCw, Users, ChevronDown } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectTotalPendientes } from '../store/useFitLogStore'
 import {
@@ -63,22 +63,7 @@ export default function HomePage() {
       <DiasDesdeUltimo />
 
       {/* Acciones principales */}
-      <div className="flex flex-col gap-4">
-        <ActionCard
-          icon={<Dumbbell size={28} />}
-          title="Iniciar rutina"
-          subtitle="Elige el día y empieza"
-          color="blue"
-          onClick={() => navigate('/rutina')}
-        />
-        <ActionCard
-          icon={<Scale size={28} />}
-          title="Registrar peso"
-          subtitle="Anota tu peso de hoy"
-          color="emerald"
-          onClick={() => navigate('/peso')}
-        />
-      </div>
+      <AccionesHome />
 
       {/* Selector de perfil para admins */}
       <SelectorPerfilAdmin />
@@ -228,13 +213,46 @@ function DiasDesdeUltimo() {
   )
 }
 
-// ── ActionCard ────────────────────────────────────────────────────────────────
+// ── ActionCard / AccionesHome ─────────────────────────────────────────────────
 
-type Color = 'blue' | 'emerald'
+type Color = 'blue' | 'emerald' | 'violet'
+
+function AccionesHome() {
+  const navigate = useNavigate()
+  const usuario  = getUsuarioActivo()
+  return (
+    <div className="flex flex-col gap-4">
+      <ActionCard
+        icon={<Dumbbell size={28} />}
+        title="Iniciar rutina"
+        subtitle="Elige el día y empieza"
+        color="blue"
+        onClick={() => navigate('/rutina')}
+      />
+      <ActionCard
+        icon={<Scale size={28} />}
+        title="Registrar peso"
+        subtitle="Anota tu peso de hoy"
+        color="emerald"
+        onClick={() => navigate('/peso')}
+      />
+      {usuario?.puedePesoCorporal && (
+        <ActionCard
+          icon={<Ruler size={28} />}
+          title="Registrar medidas"
+          subtitle="Perímetros corporales"
+          color="violet"
+          onClick={() => navigate('/medidas')}
+        />
+      )}
+    </div>
+  )
+}
 
 const COLOR_MAP: Record<Color, { bg: string; icon: string; border: string }> = {
   blue:    { bg: 'bg-blue-500/10',    icon: 'text-blue-400',    border: 'border-blue-500/20'    },
   emerald: { bg: 'bg-emerald-500/10', icon: 'text-emerald-400', border: 'border-emerald-500/20' },
+  violet:  { bg: 'bg-violet-500/10',  icon: 'text-violet-400',  border: 'border-violet-500/20'  },
 }
 
 function ActionCard({

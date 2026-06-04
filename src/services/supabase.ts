@@ -9,6 +9,7 @@ import type {
   TipoSesion,
   Ejercicio,
   RegistroComposicion,
+  RegistroMedidas,
   PerfilCorporal,
   CategoriaImc,
 } from '../types/models'
@@ -727,6 +728,72 @@ export async function cargarPerfilCorporal(
     cuelloCm:  Number(data.cuello_cm),
     caderaCm:  data.cadera_cm != null ? Number(data.cadera_cm) : undefined,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Medidas corporales (perímetros)
+// ---------------------------------------------------------------------------
+
+/** Guarda (o reemplaza) las medidas corporales del día en Supabase. */
+export async function guardarMedidas(
+  usuarioId: string,
+  registro: Omit<RegistroMedidas, 'id'>,
+): Promise<void> {
+  // Idempotente: borrar el registro del mismo día si existe
+  await supabase
+    .from('medidas_corporales')
+    .delete()
+    .eq('usuario_id', usuarioId)
+    .eq('fecha', registro.fecha)
+
+  const { error } = await supabase.from('medidas_corporales').insert({
+    usuario_id:      usuarioId,
+    fecha:           registro.fecha,
+    cuello:          registro.cuello ?? null,
+    hombro:          registro.hombro ?? null,
+    pecho:           registro.pecho ?? null,
+    biceps_izq:      registro.bicepsIzq ?? null,
+    biceps_der:      registro.bicepsDer ?? null,
+    cintura_alta:    registro.cinturaAlta ?? null,
+    cintura_baja:    registro.cinturaBaja ?? null,
+    cadera:          registro.cadera ?? null,
+    muslo_izq:       registro.musloIzq ?? null,
+    muslo_der:       registro.musloDer ?? null,
+    pantorrilla_izq: registro.pantorrillaIzq ?? null,
+    pantorrilla_der: registro.pantorrillaDer ?? null,
+    abdomen:         registro.abdomen ?? null,
+  })
+  if (error) throw error
+}
+
+/** Carga el historial de medidas corporales de un usuario desde Supabase. */
+export async function cargarMedidas(
+  usuarioId: string,
+): Promise<RegistroMedidas[]> {
+  const { data, error } = await supabase
+    .from('medidas_corporales')
+    .select('*')
+    .eq('usuario_id', usuarioId)
+    .order('fecha', { ascending: false })
+  if (error) throw error
+  if (!data) return []
+  return data.map((r) => ({
+    id:             String(r.id),
+    fecha:          String(r.fecha),
+    cuello:          r.cuello         != null ? Number(r.cuello)          : undefined,
+    hombro:          r.hombro         != null ? Number(r.hombro)          : undefined,
+    pecho:           r.pecho          != null ? Number(r.pecho)           : undefined,
+    bicepsIzq:       r.biceps_izq     != null ? Number(r.biceps_izq)      : undefined,
+    bicepsDer:       r.biceps_der     != null ? Number(r.biceps_der)      : undefined,
+    cinturaAlta:     r.cintura_alta   != null ? Number(r.cintura_alta)    : undefined,
+    cinturaBaja:     r.cintura_baja   != null ? Number(r.cintura_baja)    : undefined,
+    cadera:          r.cadera         != null ? Number(r.cadera)          : undefined,
+    musloIzq:        r.muslo_izq      != null ? Number(r.muslo_izq)       : undefined,
+    musloDer:        r.muslo_der      != null ? Number(r.muslo_der)       : undefined,
+    pantorrillaIzq:  r.pantorrilla_izq != null ? Number(r.pantorrilla_izq) : undefined,
+    pantorrillaDer:  r.pantorrilla_der != null ? Number(r.pantorrilla_der) : undefined,
+    abdomen:         r.abdomen        != null ? Number(r.abdomen)         : undefined,
+  }))
 }
 
 // ---------------------------------------------------------------------------

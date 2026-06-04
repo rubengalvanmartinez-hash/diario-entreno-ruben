@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.0.4'
+export const APP_VERSION = '2.1.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,24 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.1.0',
+    fecha: '04/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'Módulo de medidas corporales (perímetros)',
+      'Nueva pantalla /medidas con figura corporal SVG + 13 campos (cuello, hombro, pecho, bíceps, cintura, abdomen, cadera, muslo, pantorrilla)',
+      'Figura estilizada con puntos de medición y líneas de referencia visual',
+      'Campos editables posicionados alrededor de la figura alineados con cada zona',
+      'Precargar último registro como referencia (placeholder)',
+      'Guardar en Supabase (tabla medidas_corporales) con idempotencia por fecha',
+      'Al hacer login, se cargan las medidas desde Supabase junto con composición',
+      'Botón "Registrar medidas" en Inicio (solo usuarios con puede_peso_corporal)',
+      'Historial de registros anteriores colapsable en la misma pantalla',
+      'Botón "Borrar caché y reiniciar app" en Ajustes → Mantenimiento',
+      'Eliminado selector de fecha de prueba en sesión activa (solo admin)',
+    ],
+  },
   {
     version: '2.0.4',
     fecha: '04/06/2026',

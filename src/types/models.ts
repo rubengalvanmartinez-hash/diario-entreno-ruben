@@ -119,6 +119,29 @@ export function fechaHoy(): string {
 }
 
 // ---------------------------------------------------------------------------
+// RegistroMedidas  (perímetros corporales en cm)
+// ---------------------------------------------------------------------------
+
+export interface RegistroMedidas {
+  id: string
+  /** ISO 8601, ej. "2026-06-04" */
+  fecha: string
+  cuello?:          number
+  hombro?:          number
+  pecho?:           number
+  bicepsIzq?:       number
+  bicepsDer?:       number
+  cinturaAlta?:     number
+  cinturaBaja?:     number
+  cadera?:          number
+  musloIzq?:        number
+  musloDer?:        number
+  pantorrillaIzq?:  number
+  pantorrillaDer?:  number
+  abdomen?:         number
+}
+
+// ---------------------------------------------------------------------------
 // PerfilCorporal  (datos del usuario para cálculos de composición)
 // ---------------------------------------------------------------------------
 

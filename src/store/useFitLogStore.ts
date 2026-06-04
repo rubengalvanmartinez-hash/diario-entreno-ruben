@@ -9,6 +9,7 @@ import {
   type Sesion,
   type RegistroPeso,
   type RegistroComposicion,
+  type RegistroMedidas,
   type PerfilCorporal,
   type Serie,
   crearSesionEjercicio,
@@ -35,6 +36,7 @@ export interface FitLogState {
   historialSesiones: Sesion[]
   registrosPeso: RegistroPeso[]
   historialComposicion: RegistroComposicion[]
+  historialMedidas: RegistroMedidas[]
 
   // ── Perfil corporal ────────────────────────────────────────────────────
   perfilCorporal: PerfilCorporal | null
@@ -102,6 +104,10 @@ export interface FitLogActions {
   // ── Composición corporal ───────────────────────────────────────────────
   setPerfilCorporal: (perfil: Partial<PerfilCorporal>) => void
   registrarComposicion: (datos: Omit<RegistroComposicion, 'id'>) => void
+
+  // ── Medidas corporales ────────────────────────────────────────────────
+  guardarMedidasLocales: (datos: Omit<RegistroMedidas, 'id'>) => void
+  importarMedidas: (historial: RegistroMedidas[]) => void
 
   // ── Configuración de ejercicios ────────────────────────────────────────
   agregarEjercicio: (datos: Omit<Ejercicio, 'id' | 'orden'>) => void
@@ -173,6 +179,7 @@ const EMPTY_PERSIST = JSON.stringify({
     historialSesiones: [],
     registrosPeso: [],
     historialComposicion: [],
+    historialMedidas: [],
     sesionActiva: null,
     indiceEjercicioActual: 0,
     perfilCorporal: null,
@@ -232,6 +239,7 @@ const INITIAL_STATE: FitLogState = {
   historialSesiones: [],
   registrosPeso: [],
   historialComposicion: [],
+  historialMedidas: [],
   perfilCorporal: null,
   objetivosEntreno: {},
   objetivosPesoEntreno: {},
@@ -496,6 +504,23 @@ export const useFitLogStore = create<FitLogStore>()(
       registrarComposicion(datos) {
         const registro: RegistroComposicion = { id: nanoid(), ...datos }
         set((s) => ({ historialComposicion: [registro, ...s.historialComposicion] }))
+      },
+
+      // ── Medidas corporales ────────────────────────────────────────────
+
+      guardarMedidasLocales(datos) {
+        const registro: RegistroMedidas = { id: nanoid(), ...datos }
+        set((s) => ({
+          historialMedidas: [
+            registro,
+            // Reemplazar si ya hay un registro del mismo día
+            ...s.historialMedidas.filter((m) => m.fecha !== datos.fecha),
+          ].sort((a, b) => b.fecha.localeCompare(a.fecha)),
+        }))
+      },
+
+      importarMedidas(historial) {
+        set({ historialMedidas: historial })
       },
 
       // ── Ejercicios (configuración) ─────────────────────────────────────

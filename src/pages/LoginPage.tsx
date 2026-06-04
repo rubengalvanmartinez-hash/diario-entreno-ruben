@@ -18,6 +18,7 @@ import {
   asegurarUsuarioRuben,
   cargarComposicion,
   cargarPerfilCorporal,
+  cargarMedidas,
   type UsuarioSupabase,
 } from '../services/supabase'
 import { useFitLogStore } from '../store/useFitLogStore'
@@ -197,17 +198,19 @@ export default function LoginPage() {
         useFitLogStore.getState().importarEjercicios(nuevos)
       }
 
-      // Cargar composición corporal para usuarios con acceso a esa sección
+      // Cargar composición corporal y medidas para usuarios con acceso a esa sección
       const puedePeso = esRuben ? true : (u.puede_peso_corporal ?? false)
       if (puedePeso) {
         try {
-          const [composicion, perfil] = await Promise.all([
+          const [composicion, perfil, medidas] = await Promise.all([
             cargarComposicion(idSupabase),
             cargarPerfilCorporal(idSupabase),
+            cargarMedidas(idSupabase),
           ])
           useFitLogStore.getState().importarComposicionYPerfil(composicion, perfil)
+          useFitLogStore.getState().importarMedidas(medidas)
         } catch {
-          console.warn('[Login] Sin conexión — composición no cargada')
+          console.warn('[Login] Sin conexión — composición/medidas no cargadas')
         }
       }
     } catch {
