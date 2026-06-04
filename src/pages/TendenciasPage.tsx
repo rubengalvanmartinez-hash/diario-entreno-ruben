@@ -6,6 +6,7 @@ import { getUsuarioActivo, getIdActivo, actualizarSerieSupabase } from '../servi
 import { setEdicionEnCurso } from '../hooks/useSupabaseSync'
 import { generarInformePDF } from '../services/pdfReport'
 import type { Ejercicio, EtiquetaSerie, Sesion } from '../types/models'
+import { normalizarNombre } from '../utils/normalizar'
 
 const MESES_ES_CORTO = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -70,7 +71,7 @@ function diasDesdeISO(iso: string): number {
 /** Casa por ID exacto (sesiones nativas) o por nombreSnapshot normalizado (sesiones de Supabase con ID sintético). */
 function matchesEjercicio(e: { ejercicioId: string; nombreSnapshot: string; completado: boolean }, ejercicioId: string, nombre: string): boolean {
   if (e.ejercicioId === ejercicioId) return true
-  if (e.nombreSnapshot && nombre && e.nombreSnapshot.trim().toLowerCase() === nombre.trim().toLowerCase()) return true
+  if (e.nombreSnapshot && nombre && normalizarNombre(e.nombreSnapshot) === normalizarNombre(nombre)) return true
   return false
 }
 
@@ -416,6 +417,40 @@ export default function TendenciasPage() {
   useEffect(() => {
     if (!ejercicioId && sorted.length > 0) setEjercicioId(sorted[0].id)
   }, [sorted, ejercicioId])
+
+  // Diagnóstico de nombres: detecta discrepancias entre historial y configuración
+  useEffect(() => {
+    if (historialSesiones.length === 0 || ejercicios.length === 0) return
+    const nombresHistorial = new Set<string>()
+    for (const ses of historialSesiones) {
+      for (const e of ses.ejercicios) {
+        if (e.nombreSnapshot) nombresHistorial.add(e.nombreSnapshot)
+        if (e.nombreSustituido) nombresHistorial.add(e.nombreSustituido)
+      }
+    }
+    const nombresConfig = ejercicios.map((e) => e.nombre)
+    const normConfig    = nombresConfig.map(normalizarNombre)
+
+    const soloNormalizacion: string[] = []
+    const sinMatch: string[] = []
+
+    for (const nh of Array.from(nombresHistorial).sort()) {
+      const normH = normalizarNombre(nh)
+      const matchExacto = nombresConfig.includes(nh)
+      const matchNorm   = normConfig.includes(normH)
+      if (!matchExacto && matchNorm) soloNormalizacion.push(nh)
+      if (!matchExacto && !matchNorm) sinMatch.push(nh)
+    }
+
+    console.log('[fitlog] Nombres únicos en historial:', Array.from(nombresHistorial).sort())
+    console.log('[fitlog] Nombres en configuración:',  nombresConfig.sort())
+    if (soloNormalizacion.length > 0)
+      console.warn('[fitlog] Coinciden SOLO tras normalizar (tildes/mayúsculas):', soloNormalizacion)
+    if (sinMatch.length > 0)
+      console.error('[fitlog] Sin match ni siquiera normalizado (posibles typos):', sinMatch)
+    else
+      console.log('[fitlog] Todos los nombres del historial tienen match (exacto o normalizado) ✓')
+  }, [historialSesiones, ejercicios])
 
   const handleGenerarPDF = async () => {
     setGenerandoPdf(true)

@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.0.3'
+export const APP_VERSION = '2.0.4'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.0.4',
+    fecha: '04/06/2026',
+    tipo: 'media',
+    cambios: [
+      'BUG: ejercicios como Tríceps francés, Hip Thrust, Bíceps, etc. mostraban "Primera vez" en dispositivos nuevos',
+      'Causa: matching por nombreSnapshot usaba comparación exacta — fallaba por tildes o mayúsculas',
+      'Fix: función normalizarNombre() en utils/normalizar.ts — minúsculas + sin tildes + colapso de espacios',
+      'Aplicada en SesionPage: ultimoEntreno, calcularProgresosVolumen, tarjetas de resumen y texto WhatsApp',
+      'Aplicada en TendenciasPage: matchesEjercicio (ya tenía trim+toLowerCase; ahora también sin tildes)',
+      'Diagnóstico en consola al abrir Tendencias: lista nombres del historial vs config, detecta typos como "Hip Trust"',
+    ],
+  },
   {
     version: '2.0.3',
     fecha: '03/06/2026',

@@ -8,6 +8,7 @@ import { useFitLogStore, selectProgresoTotal, selectProgresoCompletados } from '
 import type { DiaId, SesionEjercicio, Serie } from '../types/models'
 import { getUsuarioActivo, sincronizarEntrenoSupabase, getRubenUUID, getPerfilVisto, getIdActivo, type UsuarioActivo } from '../services/supabase'
 import { pullHistorialInvitado } from '../hooks/useSupabaseSync'
+import { normalizarNombre } from '../utils/normalizar'
 import { sincronizarSesion } from '../services/googleSheets'
 import { enqueueEjercicio, subscribeSyncStatus, type SyncStatus } from '../services/syncQueue'
 
@@ -498,7 +499,7 @@ function EjercicioCard({
       const ej = sesion.ejercicios.find(
         (e) =>
           e.ejercicioId === ejercicio.ejercicioId ||
-          e.nombreSnapshot === ejercicio.nombreSnapshot,
+          normalizarNombre(e.nombreSnapshot) === normalizarNombre(ejercicio.nombreSnapshot),
       )
       if (ej?.completado && !ej.saltado) {
         encontrados.push({ fecha: sesion.fecha, series: ej.series, ayudaFede: ej.ayudaFede ?? false })
@@ -1380,12 +1381,8 @@ function calcularVolumen(series: Serie[]): number {
   }, 0)
 }
 
-// Ejercicios de asistencia: bajar volumen = mejorar (menos ayuda = más fuerza)
-// Comparación normalizada (sin tildes, sin mayúsculas)
-function normNombre(s: string): string {
-  return s.trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-}
+// Alias local para no romper llamadas internas a normNombre
+const normNombre = normalizarNombre
 const ASISTENCIA_NOMBRES = ['dominadas']
 function isAsistencia(nombre: string): boolean {
   const n = normNombre(nombre)
@@ -1433,7 +1430,8 @@ function calcularProgresosVolumen(
       if (ses.id === sesionActualId) continue   // ← excluir sesión recién completada
       const ejPrev = ses.ejercicios.find(
         (e) =>
-          (e.nombreSnapshot === ej.nombreSnapshot || e.ejercicioId === ej.ejercicioId) &&
+          (e.ejercicioId === ej.ejercicioId ||
+            normalizarNombre(e.nombreSnapshot) === normalizarNombre(ej.nombreSnapshot)) &&
           e.completado && !e.saltado,
       )
       if (ejPrev) {
@@ -1503,7 +1501,8 @@ function generarTextoWhatsApp(
       if (acc) return acc
       return ses.ejercicios.find(
         (e) =>
-          (e.nombreSnapshot === ej.nombreSnapshot || e.ejercicioId === ej.ejercicioId) &&
+          (e.ejercicioId === ej.ejercicioId ||
+            normalizarNombre(e.nombreSnapshot) === normalizarNombre(ej.nombreSnapshot)) &&
           e.completado && !e.saltado,
       ) ?? null
     }, null)
@@ -1746,7 +1745,8 @@ function ResumenSesion({
                 if (acc) return acc
                 return ses.ejercicios.find(
                   (e) =>
-                    (e.nombreSnapshot === ej.nombreSnapshot || e.ejercicioId === ej.ejercicioId) &&
+                    (e.ejercicioId === ej.ejercicioId ||
+                      normalizarNombre(e.nombreSnapshot) === normalizarNombre(ej.nombreSnapshot)) &&
                     e.completado && !e.saltado,
                 ) ?? null
               }, null)
