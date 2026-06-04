@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronLeft, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { Trash2 } from 'lucide-react'
@@ -347,6 +347,14 @@ export default function MedidasPage() {
 
         {/* ── Botón guardar ── */}
         <div className="px-5 pt-4 pb-2 flex flex-col gap-2">
+          <button
+            onClick={() => navigate('/progreso-corporal')}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-zinc-800 border border-zinc-700
+                       py-3 text-sm font-bold text-zinc-300 active:bg-zinc-700"
+          >
+            <BarChart2 size={16} />
+            Ver progreso corporal
+          </button>
           <button
             onClick={handleGuardar}
             disabled={guardando}

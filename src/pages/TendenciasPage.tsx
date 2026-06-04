@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown, ChevronRight, ChevronDown, ChevronUp, ArrowLeft, AlertTriangle, X } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
@@ -399,8 +400,10 @@ function CalendarioCalor({ sesionDates }: { sesionDates: Set<string> }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function TendenciasPage() {
+  const navigate          = useNavigate()
   const ejercicios        = useFitLogStore(useShallow((s) => s.ejercicios))
   const historialSesiones = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const usuario           = getUsuarioActivo()
   const sorted = useMemo(
     () => [...ejercicios].sort((a, b) => a.dia - b.dia || a.orden - b.orden),
     [ejercicios],
@@ -485,6 +488,20 @@ export default function TendenciasPage() {
       <div className="px-4 pt-6 pb-4 flex items-center gap-3">
         <h1 className="text-2xl font-black text-white tracking-tight">Tendencias</h1>
       </div>
+
+      {/* Progreso corporal — solo si puede_peso_corporal */}
+      {usuario?.puedePesoCorporal && (
+        <div className="mx-4 mb-4">
+          <button
+            onClick={() => navigate('/progreso-corporal')}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-zinc-900 border border-zinc-800
+                       py-3 text-sm font-bold text-zinc-300 active:bg-zinc-700"
+          >
+            <BarChart2 size={16} />
+            Centro de Progreso Corporal
+          </button>
+        </div>
+      )}
 
       {/* Informe PDF */}
       <div className="mx-4 mb-5 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3">

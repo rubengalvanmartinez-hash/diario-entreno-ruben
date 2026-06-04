@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.1.4'
+export const APP_VERSION = '2.2.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.0',
+    fecha: '04/06/2026',
+    tipo: 'mayor',
+    cambios: [
+      'Nueva pantalla /progreso-corporal: Centro de Progreso Corporal',
+      'Tab Resumen: Puntuación Global 0-100 (muscular×40% + cintura×20% + simetría×20% + consistencia×20%), detector de estado (Hipertrofia limpia, Volumen con grasa, Recomposición, Estancamiento, Pérdida), ranking de zonas que progresan/rezagadas, análisis de simetría izq/der, insights automáticos',
+      'Tab Cuerpo: Body map SVG interactivo con puntos de color por zona (azul=mejor marca, verde=progresando, amarillo=lento, rojo=sin progreso), detalle por zona con cambio a 30/90/365d',
+      'Tab Analizar: comparador temporal (30d/90d/365d/máximo), gráfica de evolución por zona con selector, proyección lineal orientativa a 30/90/180 días, radar muscular (% de mejor marca)',
+      'Acceso desde /medidas y desde Tendencias (solo usuarios con puede_peso_corporal)',
+      'Todos los cálculos sobre datos reales de medidas_corporales; estimaciones etiquetadas como orientativas',
+    ],
+  },
   {
     version: '2.1.4',
     fecha: '04/06/2026',
