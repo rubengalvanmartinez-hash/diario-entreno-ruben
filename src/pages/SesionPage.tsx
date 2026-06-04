@@ -189,7 +189,6 @@ export default function SesionPage() {
 
   const [usuario]          = useState<UsuarioActivo | null>(() => getUsuarioActivo())
   const iniciarSesion      = useFitLogStore((s) => s.iniciarSesion)
-  const cambiarFecha       = useFitLogStore((s) => s.cambiarFechaSesionActiva)
   const sesionActiva       = useFitLogStore(useShallow((s) => s.sesionActiva))
   const indice             = useFitLogStore((s) => s.indiceEjercicioActual)
   const irAEjercicio       = useFitLogStore((s) => s.irAEjercicio)
@@ -377,20 +376,6 @@ export default function SesionPage() {
           </button>
         </div>
       </header>
-
-      {/* ── Fecha de sesión (solo admin) ── */}
-      {usuario?.esAdmin && sesionActiva && (
-        <div className="bg-amber-950/40 border-b border-amber-800/40 px-5 py-2.5 flex items-center gap-3">
-          <span className="text-xs font-semibold text-amber-400 shrink-0">📅 Fecha de la sesión:</span>
-          <input
-            type="date"
-            value={sesionActiva.fecha}
-            onChange={(e) => { if (e.target.value) cambiarFecha(e.target.value) }}
-            className="bg-zinc-800 border border-amber-700/50 rounded-lg px-2 py-1 text-sm text-white
-                       focus:outline-none focus:ring-2 focus:ring-amber-500"
-          />
-        </div>
-      )}
 
       {/* ── Ejercicio actual ── */}
       <div className="flex-1 overflow-y-auto">

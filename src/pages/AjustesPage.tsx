@@ -114,6 +114,11 @@ export default function AjustesPage() {
         <SeccionBackupRestore />
       </section>
 
+      <section className="flex flex-col gap-3">
+        <SectionLabel>Mantenimiento</SectionLabel>
+        <SeccionBorrarCache />
+      </section>
+
       <SeccionVersion />
     </div>
   )
@@ -1836,6 +1841,67 @@ function SeccionVerificarSupabase() {
     </div>
   )
 }
+
+// ── SeccionBorrarCache ────────────────────────────────────────────────────────
+
+function SeccionBorrarCache() {
+  const [confirmando, setConfirmando] = useState(false)
+  const [borrando,    setBorrando]    = useState(false)
+
+  const handleBorrar = async () => {
+    setBorrando(true)
+    try {
+      // 1. Limpiar todas las cachés del SW
+      if ('caches' in window) {
+        const nombres = await caches.keys()
+        await Promise.all(nombres.map((n) => caches.delete(n)))
+      }
+      // 2. Desregistrar el service worker
+      if ('serviceWorker' in navigator) {
+        const registros = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(registros.map((r) => r.unregister()))
+      }
+    } finally {
+      // 3. Recargar forzando red (sin caché)
+      window.location.reload()
+    }
+  }
+
+  if (confirmando) {
+    return (
+      <div className="bg-red-950/40 border border-red-800/50 rounded-2xl p-4 flex flex-col gap-3">
+        <p className="text-sm text-red-300 font-semibold">¿Borrar caché y reiniciar la app?</p>
+        <p className="text-xs text-zinc-400">Se eliminarán todos los archivos en caché y el service worker. La app se recargará desde el servidor.</p>
+        <div className="flex gap-2">
+          <button
+            onClick={handleBorrar}
+            disabled={borrando}
+            className="flex-1 rounded-xl bg-red-600 py-2 text-sm font-bold text-white active:bg-red-700 disabled:opacity-50"
+          >
+            {borrando ? 'Borrando…' : 'Sí, borrar y reiniciar'}
+          </button>
+          <button
+            onClick={() => setConfirmando(false)}
+            className="flex-1 rounded-xl bg-zinc-700 py-2 text-sm font-bold text-white active:bg-zinc-600"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => setConfirmando(true)}
+      className="w-full flex items-center justify-center gap-2 rounded-2xl bg-zinc-800 border border-zinc-700 py-3 text-sm font-bold text-zinc-300 active:bg-zinc-700"
+    >
+      🔄 Borrar caché y reiniciar app
+    </button>
+  )
+}
+
+// ── SeccionVersion ────────────────────────────────────────────────────────────
 
 function SeccionVersion() {
   const [open, setOpen] = useState(false)
