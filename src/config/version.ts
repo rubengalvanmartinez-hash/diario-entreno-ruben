@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.1.1'
+export const APP_VERSION = '2.1.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,15 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.1.2',
+    fecha: '04/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: selector de fecha en /medidas estaba oculto en la cabecera — invisible en móvil',
+      'Fix: banda de fecha prominente entre la cabecera y la figura corporal, con etiqueta "Fecha de la medición:"',
+    ],
+  },
   {
     version: '2.1.1',
     fecha: '04/06/2026',

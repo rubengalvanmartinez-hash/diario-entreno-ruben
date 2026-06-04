@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronDown, ChevronUp } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
-import { getUsuarioActivo, getIdActivo, guardarMedidas } from '../services/supabase'
+import { Trash2 } from 'lucide-react'
+import { getUsuarioActivo, getIdActivo, guardarMedidas, eliminarMedidasSupabase } from '../services/supabase'
 import type { RegistroMedidas } from '../types/models'
 
 // ── Configuración de campos ───────────────────────────────────────────────────
@@ -155,10 +156,12 @@ function formatFechaES(iso: string): string {
 
 export default function MedidasPage() {
   const navigate              = useNavigate()
-  const historialMedidas      = useFitLogStore(useShallow((s) => s.historialMedidas))
-  const guardarMedidasLocales = useFitLogStore((s) => s.guardarMedidasLocales)
+  const historialMedidas        = useFitLogStore(useShallow((s) => s.historialMedidas))
+  const guardarMedidasLocales   = useFitLogStore((s) => s.guardarMedidasLocales)
+  const eliminarMedidasLocales  = useFitLogStore((s) => s.eliminarMedidasLocales)
 
   const hoy = new Date().toISOString().slice(0, 10)
+  const [fecha, setFecha] = useState(hoy)
 
   // Último registro guardado (referencia)
   const ultima = historialMedidas[0] ?? null
@@ -210,7 +213,7 @@ export default function MedidasPage() {
     setMsg('')
     try {
       const registro: Omit<RegistroMedidas, 'id'> = {
-        fecha:           hoy,
+        fecha:           fecha,
         cuello:          parseNum(valores.cuello          ?? ''),
         hombro:          parseNum(valores.hombro          ?? ''),
         pecho:           parseNum(valores.pecho           ?? ''),
@@ -250,19 +253,24 @@ export default function MedidasPage() {
         <button onClick={() => navigate(-1)} className="p-1 -ml-1 text-zinc-400 active:text-white">
           <ChevronLeft size={22} />
         </button>
-        <div className="flex-1">
-          <h1 className="text-base font-bold text-white leading-tight">Medidas corporales</h1>
-          <p className="text-xs text-zinc-500">{formatFechaES(hoy)}</p>
-        </div>
-        {ultima && (
-          <p className="text-[10px] text-zinc-600">
-            Ref: {formatFechaES(ultima.fecha)}
-          </p>
-        )}
+        <h1 className="text-base font-bold text-white leading-tight">Medidas corporales</h1>
       </header>
 
       {/* Cuerpo principal */}
       <div className="flex-1 overflow-y-auto">
+
+        {/* ── Selector de fecha ── */}
+        <div className="mx-4 mt-4 mb-1 flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3">
+          <span className="text-xs font-semibold text-zinc-400 whitespace-nowrap">Fecha de la medición:</span>
+          <input
+            type="date"
+            value={fecha}
+            max={hoy}
+            onChange={(e) => { if (e.target.value) { setFecha(e.target.value); setMsg('') } }}
+            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white
+                       focus:outline-none focus:border-blue-500"
+          />
+        </div>
 
         {/* ── Diagrama corporal ── */}
         <div className="flex items-start px-2 pt-4 pb-2">
@@ -378,7 +386,17 @@ export default function MedidasPage() {
                 <p className="text-xs text-zinc-600 text-center py-4">Sin registros aún</p>
               )}
               {historialMedidas.slice(0, 20).map((r) => (
-                <HistorialItem key={r.id} registro={r} />
+                <HistorialItem
+                  key={r.id}
+                  registro={r}
+                  onEliminar={async () => {
+                    const uid = getIdActivo()
+                    if (uid) {
+                      try { await eliminarMedidasSupabase(uid, r.id) } catch { /* offline OK */ }
+                    }
+                    eliminarMedidasLocales(r.id)
+                  }}
+                />
               ))}
             </div>
           )}
@@ -391,26 +409,67 @@ export default function MedidasPage() {
 
 // ── HistorialItem ─────────────────────────────────────────────────────────────
 
-function HistorialItem({ registro }: { registro: RegistroMedidas }) {
+function HistorialItem({
+  registro,
+  onEliminar,
+}: {
+  registro: RegistroMedidas
+  onEliminar: () => Promise<void>
+}) {
+  const [confirmando, setConfirmando] = useState(false)
+  const [borrando,    setBorrando]    = useState(false)
+
   const campos: Array<{ label: string; val?: number }> = [
-    { label: 'Cuello',    val: registro.cuello        },
-    { label: 'Hombro',    val: registro.hombro        },
-    { label: 'Pecho',     val: registro.pecho         },
-    { label: 'Bíc.Izq',  val: registro.bicepsIzq     },
-    { label: 'Bíc.Der',  val: registro.bicepsDer     },
-    { label: 'Cin.Alta',  val: registro.cinturaAlta   },
-    { label: 'Abdomen',   val: registro.abdomen       },
-    { label: 'Cin.Baja',  val: registro.cinturaBaja   },
-    { label: 'Cadera',    val: registro.cadera        },
-    { label: 'Muslo Izq', val: registro.musloIzq      },
-    { label: 'Muslo Der', val: registro.musloDer      },
+    { label: 'Cuello',    val: registro.cuello         },
+    { label: 'Hombro',    val: registro.hombro         },
+    { label: 'Pecho',     val: registro.pecho          },
+    { label: 'Bíc.Izq',  val: registro.bicepsIzq      },
+    { label: 'Bíc.Der',  val: registro.bicepsDer      },
+    { label: 'Cin.Alta',  val: registro.cinturaAlta    },
+    { label: 'Abdomen',   val: registro.abdomen        },
+    { label: 'Cin.Baja',  val: registro.cinturaBaja    },
+    { label: 'Cadera',    val: registro.cadera         },
+    { label: 'Muslo Izq', val: registro.musloIzq       },
+    { label: 'Muslo Der', val: registro.musloDer       },
     { label: 'Pant.Izq',  val: registro.pantorrillaIzq },
     { label: 'Pant.Der',  val: registro.pantorrillaDer },
   ].filter((c) => c.val != null)
 
+  const handleBorrar = async () => {
+    setBorrando(true)
+    try { await onEliminar() } finally { setBorrando(false) }
+  }
+
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3">
-      <p className="text-xs font-bold text-zinc-400 mb-2">{formatFechaES(registro.fecha)}</p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-bold text-zinc-400">{formatFechaES(registro.fecha)}</p>
+        {!confirmando ? (
+          <button
+            onClick={() => setConfirmando(true)}
+            className="p-1 text-zinc-600 active:text-red-400"
+          >
+            <Trash2 size={14} />
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-500">¿Eliminar?</span>
+            <button
+              onClick={handleBorrar}
+              disabled={borrando}
+              className="text-[10px] font-bold text-red-400 active:text-red-300 disabled:opacity-50"
+            >
+              {borrando ? '…' : 'Sí'}
+            </button>
+            <button
+              onClick={() => setConfirmando(false)}
+              className="text-[10px] font-bold text-zinc-500 active:text-zinc-300"
+            >
+              No
+            </button>
+          </div>
+        )}
+      </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1">
         {campos.map((c) => (
           <span key={c.label} className="text-xs text-zinc-300">
