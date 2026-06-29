@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.0'
+export const APP_VERSION = '2.2.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.1',
+    fecha: '29/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'Nueva herramienta "Matching de nombres" en Ajustes → Diagnóstico de datos',
+      'Muestra todos los nombres únicos de ejercicios en el historial cargado',
+      'Muestra los nombres de la configuración actual del usuario',
+      'Compara y lista los nombres del historial que NO tienen match con la configuración (ni siquiera tras normalizarNombre)',
+      'Sección "Sin match — problemáticos" en rojo con el nombre original y su forma normalizada',
+      'Indicador ✓/✗ por cada nombre del historial para ver de un vistazo cuáles casan y cuáles no',
+    ],
+  },
   {
     version: '2.2.0',
     fecha: '04/06/2026',

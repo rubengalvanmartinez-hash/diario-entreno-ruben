@@ -16,6 +16,7 @@ import {
 } from '../services/googleSheets'
 import { guardarImagen, obtenerImagen, eliminarImagen } from '../services/imageDB'
 import type { DiaId, Ejercicio, Sesion, RegistroPeso, RegistroComposicion, PerfilCorporal } from '../types/models'
+import { normalizarNombre } from '../utils/normalizar'
 import { APP_VERSION, CHANGELOG } from '../config/version'
 
 const DIAS: DiaId[] = [1, 2, 3]
@@ -111,6 +112,7 @@ export default function AjustesPage() {
       <section className="flex flex-col gap-3">
         <SectionLabel>Diagnóstico de datos</SectionLabel>
         <SeccionDiagnostico />
+        <SeccionDiagnosticoNombres />
         <SeccionBackupRestore />
       </section>
 
@@ -1119,6 +1121,131 @@ function FilaLS({ label, value, ok, dimIfNo }: { label: string; value: string; o
     <div className="flex items-center justify-between gap-3">
       <span className="text-xs text-zinc-500">{label}</span>
       <span className={['text-xs font-bold font-mono', color].join(' ')}>{value}</span>
+    </div>
+  )
+}
+
+// ── SeccionDiagnosticoNombres ─────────────────────────────────────────────────
+
+function SeccionDiagnosticoNombres() {
+  const historialSesiones = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const ejercicios        = useFitLogStore(useShallow((s) => s.ejercicios))
+  const [abierto, setAbierto] = useState(false)
+
+  const diagnostico = useMemo(() => {
+    // Nombres únicos en historial (nombreSustituido ?? nombreSnapshot)
+    const setHistorial = new Set<string>()
+    for (const ses of historialSesiones) {
+      for (const ej of ses.ejercicios) {
+        if (!ej.completado || ej.saltado) continue
+        const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
+        if (nombre) setHistorial.add(nombre)
+      }
+    }
+    const nombresHistorial = Array.from(setHistorial).sort()
+
+    // Nombres en la configuración actual
+    const nombresConfig = ejercicios.map((e) => e.nombre).sort()
+    const normConfig = new Set(nombresConfig.map(normalizarNombre))
+
+    // Sin match: nombres del historial que ni siquiera tras normalizar coinciden con algún ejercicio de config
+    const sinMatch: string[] = []
+    for (const nh of nombresHistorial) {
+      const normH = normalizarNombre(nh)
+      if (!normConfig.has(normH)) {
+        sinMatch.push(nh)
+      }
+    }
+
+    return { nombresHistorial, nombresConfig, sinMatch }
+  }, [historialSesiones, ejercicios])
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3">
+      <button
+        onClick={() => setAbierto((v) => !v)}
+        className="flex items-center justify-between gap-3 w-full"
+      >
+        <div className="flex items-center gap-3">
+          <div className="size-9 rounded-xl bg-amber-900/30 flex items-center justify-center shrink-0">
+            <AlertCircle size={16} className="text-amber-400" />
+          </div>
+          <div className="text-left">
+            <p className="text-sm font-bold text-white">Matching de nombres</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {diagnostico.nombresHistorial.length} en historial · {diagnostico.nombresConfig.length} en config · {diagnostico.sinMatch.length} sin match
+            </p>
+          </div>
+        </div>
+        <ChevronRight
+          size={16}
+          className={['text-zinc-600 transition-transform shrink-0', abierto ? 'rotate-90' : ''].join(' ')}
+        />
+      </button>
+
+      {abierto && (
+        <div className="flex flex-col gap-4 pt-2 border-t border-zinc-800">
+
+          {/* Sin match (problemáticos) */}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-red-400">
+              Sin match — problemáticos ({diagnostico.sinMatch.length})
+            </p>
+            {diagnostico.sinMatch.length === 0 ? (
+              <p className="text-xs text-green-400">Todos los nombres del historial tienen match con la configuración.</p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {diagnostico.sinMatch.map((nombre) => (
+                  <li key={nombre} className="flex items-start gap-2 text-xs">
+                    <span className="text-red-500 shrink-0 mt-0.5">✗</span>
+                    <span className="text-red-300 font-mono break-all">{nombre}</span>
+                    <span className="text-zinc-600 ml-auto shrink-0 font-mono">→ {normalizarNombre(nombre)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Nombres en historial */}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-blue-400">
+              Nombres en historial ({diagnostico.nombresHistorial.length})
+            </p>
+            <ul className="flex flex-col gap-0.5 max-h-60 overflow-y-auto">
+              {diagnostico.nombresHistorial.map((nombre) => {
+                const normH = normalizarNombre(nombre)
+                const tieneMatch = ejercicios.some((e) => normalizarNombre(e.nombre) === normH)
+                return (
+                  <li key={nombre} className="flex items-center gap-2 text-xs">
+                    <span className={tieneMatch ? 'text-green-500' : 'text-red-500'}>
+                      {tieneMatch ? '✓' : '✗'}
+                    </span>
+                    <span className={['font-mono break-all', tieneMatch ? 'text-zinc-400' : 'text-red-300'].join(' ')}>
+                      {nombre}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+
+          {/* Nombres en configuración */}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-emerald-400">
+              Nombres en configuración ({diagnostico.nombresConfig.length})
+            </p>
+            <ul className="flex flex-col gap-0.5">
+              {diagnostico.nombresConfig.map((nombre, i) => (
+                <li key={`${nombre}-${i}`} className="flex items-center gap-2 text-xs text-zinc-400">
+                  <span className="text-emerald-500 shrink-0">·</span>
+                  <span className="font-mono break-all">{nombre}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+        </div>
+      )}
     </div>
   )
 }
