@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.1'
+export const APP_VERSION = '2.2.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,16 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.2',
+    fecha: '29/06/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: botón "Recargar datos desde Supabase" bloqueaba a Rubén con "localStorage es la fuente de verdad" — código obsoleto de v1.5.2',
+      'Fix: Rubén puede recargar desde Supabase igual que cualquier usuario (usa RUBEN_UUID)',
+      'Protección: si Supabase devuelve 0 sesiones pero hay datos locales, se conservan los locales',
+    ],
+  },
   {
     version: '2.2.1',
     fecha: '29/06/2026',

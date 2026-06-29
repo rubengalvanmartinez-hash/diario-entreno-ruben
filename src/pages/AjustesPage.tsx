@@ -1874,13 +1874,13 @@ function SeccionSyncPendientes() {
             setMsgRecarga('')
             try {
               const usuario = getUsuarioActivo()
-              if (usuario?.esRuben) {
-                setMsgRecarga('⛔ Rubén usa localStorage como fuente de verdad. Esta acción está bloqueada.')
-                return
-              }
-              const uid = usuario?.id ?? ''
+              const uid = usuario?.esRuben ? getRubenUUID() : (usuario?.id ?? '')
               if (!uid) { setMsgRecarga('❌ No hay usuario activo.'); return }
               const { sesiones, registrosPeso: pesos } = await cargarDatosUsuario(uid)
+              if (sesiones.length === 0 && useFitLogStore.getState().historialSesiones.length > 0) {
+                setMsgRecarga('⚠️ Supabase devolvió 0 sesiones — se conservan los datos locales.')
+                return
+              }
               useFitLogStore.getState().importarHistorialCompleto(sesiones, pesos)
               setMsgRecarga(`✅ ${sesiones.length} sesiones y ${pesos.length} registros de peso cargados.`)
             } catch (err) {
