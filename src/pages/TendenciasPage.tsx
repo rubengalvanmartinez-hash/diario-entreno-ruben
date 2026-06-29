@@ -7,7 +7,7 @@ import { getUsuarioActivo, getIdActivo, actualizarSerieSupabase } from '../servi
 import { setEdicionEnCurso } from '../hooks/useSupabaseSync'
 import { generarInformePDF } from '../services/pdfReport'
 import type { Ejercicio, EtiquetaSerie, Sesion } from '../types/models'
-import { normalizarNombre } from '../utils/normalizar'
+import { normalizarNombre, matchesEjercicio } from '../utils/normalizar'
 
 const MESES_ES_CORTO = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -69,12 +69,6 @@ function diasDesdeISO(iso: string): number {
   return Math.round((new Date(hoy).getTime() - new Date(iso).getTime()) / 86_400_000)
 }
 
-/** Casa por ID exacto (sesiones nativas) o por nombreSnapshot normalizado (sesiones de Supabase con ID sintético). */
-function matchesEjercicio(e: { ejercicioId: string; nombreSnapshot: string; completado: boolean }, ejercicioId: string, nombre: string): boolean {
-  if (e.ejercicioId === ejercicioId) return true
-  if (e.nombreSnapshot && nombre && normalizarNombre(e.nombreSnapshot) === normalizarNombre(nombre)) return true
-  return false
-}
 
 function procesarDatos(sesiones: Sesion[], ejercicioId: string, nombre: string): PuntoSesion[] {
   const puntos = sesiones

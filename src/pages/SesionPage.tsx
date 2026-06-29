@@ -8,7 +8,7 @@ import { useFitLogStore, selectProgresoTotal, selectProgresoCompletados } from '
 import type { DiaId, SesionEjercicio, Serie } from '../types/models'
 import { getUsuarioActivo, sincronizarEntrenoSupabase, getRubenUUID, getPerfilVisto, getIdActivo, type UsuarioActivo } from '../services/supabase'
 import { pullHistorialInvitado } from '../hooks/useSupabaseSync'
-import { normalizarNombre } from '../utils/normalizar'
+import { normalizarNombre, matchesEjercicio } from '../utils/normalizar'
 import { sincronizarSesion } from '../services/googleSheets'
 import { enqueueEjercicio, subscribeSyncStatus, type SyncStatus } from '../services/syncQueue'
 
@@ -482,17 +482,15 @@ function EjercicioCard({
     const encontrados: { fecha: string; series: Serie[]; ayudaFede: boolean }[] = []
     for (const sesion of ordenado) {
       const ej = sesion.ejercicios.find(
-        (e) =>
-          e.ejercicioId === ejercicio.ejercicioId ||
-          normalizarNombre(e.nombreSnapshot) === normalizarNombre(ejercicio.nombreSnapshot),
+        (e) => matchesEjercicio(e, ejercicio.ejercicioId, nombre) && e.completado && !e.saltado,
       )
-      if (ej?.completado && !ej.saltado) {
+      if (ej) {
         encontrados.push({ fecha: sesion.fecha, series: ej.series, ayudaFede: ej.ayudaFede ?? false })
         if (encontrados.length === 2) break
       }
     }
     return { ultimoEntreno: encontrados[0] ?? null, penultimoEntreno: encontrados[1] ?? null }
-  }, [historialSesiones, ejercicio.ejercicioId, ejercicio.nombreSnapshot])
+  }, [historialSesiones, ejercicio.ejercicioId, nombre])
 
   const [series,   setSeries]   = useState<Serie[]>(() => ejercicio.series.map((s) => ({ ...s })))
   const [pesosRaw, setPesosRaw] = useState<string[]>(() =>
@@ -1366,11 +1364,9 @@ function calcularVolumen(series: Serie[]): number {
   }, 0)
 }
 
-// Alias local para no romper llamadas internas a normNombre
-const normNombre = normalizarNombre
 const ASISTENCIA_NOMBRES = ['dominadas']
 function isAsistencia(nombre: string): boolean {
-  const n = normNombre(nombre)
+  const n = normalizarNombre(nombre)
   return ASISTENCIA_NOMBRES.some((a) => n.includes(a))
 }
 
@@ -1414,10 +1410,7 @@ function calcularProgresosVolumen(
     for (const ses of historialOrdenado) {
       if (ses.id === sesionActualId) continue   // ← excluir sesión recién completada
       const ejPrev = ses.ejercicios.find(
-        (e) =>
-          (e.ejercicioId === ej.ejercicioId ||
-            normalizarNombre(e.nombreSnapshot) === normalizarNombre(ej.nombreSnapshot)) &&
-          e.completado && !e.saltado,
+        (e) => matchesEjercicio(e, ej.ejercicioId, nombre) && e.completado && !e.saltado,
       )
       if (ejPrev) {
         const v = calcularVolumen(ejPrev.series)
@@ -1482,18 +1475,15 @@ function generarTextoWhatsApp(
     if (ej.ayudaFede) lines.push('  💪 Fede ayudó')
 
     // Récord / primera vez
+    const ejNombre    = ej.nombreSustituido ?? ej.nombreSnapshot
     const ultimoHist = historialOrdenado.reduce<SesionEjercicio | null>((acc, ses) => {
       if (acc) return acc
       return ses.ejercicios.find(
-        (e) =>
-          (e.ejercicioId === ej.ejercicioId ||
-            normalizarNombre(e.nombreSnapshot) === normalizarNombre(ej.nombreSnapshot)) &&
-          e.completado && !e.saltado,
+        (e) => matchesEjercicio(e, ej.ejercicioId, ejNombre) && e.completado && !e.saltado,
       ) ?? null
     }, null)
     const maxHist     = ultimoHist ? pesoMax(ultimoHist.series) : null
     const maxActual   = pesoMax(ej.series)
-    const ejNombre    = ej.nombreSustituido ?? ej.nombreSnapshot
     const ejEsAsist   = isAsistencia(ejNombre)
     if (ultimoHist === null && maxActual !== null) {
       lines.push('  ⭐ ¡Primera vez!')
@@ -1729,10 +1719,7 @@ function ResumenSesion({
               const ultimoHist = historialOrdenado.reduce<SesionEjercicio | null>((acc, ses) => {
                 if (acc) return acc
                 return ses.ejercicios.find(
-                  (e) =>
-                    (e.ejercicioId === ej.ejercicioId ||
-                      normalizarNombre(e.nombreSnapshot) === normalizarNombre(ej.nombreSnapshot)) &&
-                    e.completado && !e.saltado,
+                  (e) => matchesEjercicio(e, ej.ejercicioId, nombre) && e.completado && !e.saltado,
                 ) ?? null
               }, null)
 

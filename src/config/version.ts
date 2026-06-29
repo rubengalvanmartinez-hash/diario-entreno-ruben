@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.2'
+export const APP_VERSION = '2.2.3'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.3',
+    fecha: '29/06/2026',
+    tipo: 'media',
+    cambios: [
+      'BUG: "Último entreno" en SesionPage no encontraba historial para algunos ejercicios (Tríceps francés, Peso muerto, Bíceps, etc.)',
+      'Causa: SesionPage usaba matching inline sin guardas de seguridad — fallaba con nombreSnapshot vacío o datos de Supabase con ID sintético',
+      'Fix: función matchesEjercicio() extraída a utils/normalizar.ts — compartida entre SesionPage y TendenciasPage',
+      'matchesEjercicio: primero intenta por ID exacto, luego por nombre normalizado con guardas de seguridad (truthy check antes de normalizar)',
+      'SesionPage: ultimoEntreno, calcularProgresosVolumen, resumen y WhatsApp usan ahora matchesEjercicio con el nombre efectivo (nombreSustituido ?? nombreSnapshot)',
+      'Eliminado alias normNombre innecesario en SesionPage',
+    ],
+  },
   {
     version: '2.2.2',
     fecha: '29/06/2026',
