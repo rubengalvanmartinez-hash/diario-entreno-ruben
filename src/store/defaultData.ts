@@ -49,3 +49,16 @@ export const DEFAULT_EJERCICIOS: Ejercicio[] = seeds.map((s) => ({
   notasFijas: '',
   orden: s.orden,
 }))
+
+/**
+ * true si la lista es exactamente la configuración semilla sin personalizar
+ * (mismos día/orden/nombre). Un dispositivo nuevo arranca con esta config;
+ * no debe tratarse como configuración propia del usuario.
+ */
+export function esConfigPorDefecto(ejercicios: Ejercicio[]): boolean {
+  if (ejercicios.length !== DEFAULT_EJERCICIOS.length) return false
+  const clave = (e: Pick<Ejercicio, 'dia' | 'orden' | 'nombre'>) => `${e.dia}|${e.orden}|${e.nombre}`
+  const actuales = ejercicios.map(clave).sort()
+  const semilla  = DEFAULT_EJERCICIOS.map(clave).sort()
+  return actuales.every((v, i) => v === semilla[i])
+}

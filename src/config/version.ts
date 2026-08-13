@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.6'
+export const APP_VERSION = '2.2.7'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.7',
+    fecha: '13/08/2026',
+    tipo: 'media',
+    cambios: [
+      'FIX de seguridad sobre v2.2.6: el respaldo de config ya NO sube la configuración semilla sin personalizar (esConfigPorDefecto) — en un dispositivo nuevo habría subido los 18 ejercicios por defecto y machacado la config real de Rubén en su siguiente login',
+      'Testeado con datos reales sembrados: último entreno salta sesiones vacías (Oblicuos en polea → 01/08), acepta peso corporal 0kg (Dominadas 0kg×7) y casa alias (Hip Thrust ↔ HipTrust); 31 tests de lógica en test-logic.mts',
+      'DESCUBIERTO en el test: RLS bloquea ejercicios_usuario con la clave anon (error 42501) — el sync de config lleva fallando desde v1.1.0 y por eso la tabla está vacía; requiere crear policies en Supabase (SQL pendiente de ejecutar por el admin)',
+      'test-logic.mts añadido al repo: bundle con rolldown + node para verificar normalizar/alias/serieConDatos/esConfigPorDefecto antes de cada entrega',
+    ],
+  },
   {
     version: '2.2.6',
     fecha: '13/08/2026',

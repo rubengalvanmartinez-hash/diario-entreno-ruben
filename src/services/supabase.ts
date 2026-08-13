@@ -14,7 +14,7 @@ import type {
   CategoriaImc,
 } from '../types/models'
 import { serieConDatos } from '../types/models'
-import { DEFAULT_EJERCICIOS } from '../store/defaultData'
+import { DEFAULT_EJERCICIOS, esConfigPorDefecto } from '../store/defaultData'
 import { useFitLogStore } from '../store/useFitLogStore'
 
 // ---------------------------------------------------------------------------
@@ -546,6 +546,9 @@ export async function respaldarConfigEjerciciosSiFalta(): Promise<void> {
   if (getPerfilVisto()) return // el store contiene los ejercicios del perfil visto, no los propios
   const ejerciciosLocales = useFitLogStore.getState().ejercicios
   if (ejerciciosLocales.length === 0) return
+  // Config semilla sin personalizar (dispositivo nuevo): no es la config real
+  // del usuario — subirla machacaría la buena en el siguiente login
+  if (esConfigPorDefecto(ejerciciosLocales)) return
 
   const uid = usuario.esRuben ? getRubenUUID() : usuario.id
   const remotos = await obtenerEjerciciosUsuario(uid)
