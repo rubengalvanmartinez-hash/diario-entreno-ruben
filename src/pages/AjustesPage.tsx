@@ -16,7 +16,7 @@ import {
 } from '../services/googleSheets'
 import { guardarImagen, obtenerImagen, eliminarImagen } from '../services/imageDB'
 import type { DiaId, Ejercicio, Sesion, RegistroPeso, RegistroComposicion, PerfilCorporal } from '../types/models'
-import { normalizarNombre } from '../utils/normalizar'
+import { normalizarNombre, nombreCanonico } from '../utils/normalizar'
 import { APP_VERSION, CHANGELOG } from '../config/version'
 
 const DIAS: DiaId[] = [1, 2, 3]
@@ -113,6 +113,7 @@ export default function AjustesPage() {
         <SectionLabel>Diagnóstico de datos</SectionLabel>
         <SeccionDiagnostico />
         <SeccionDiagnosticoNombres />
+        <SeccionRecuperarEjercicios />
         <SeccionBackupRestore />
       </section>
 
@@ -1146,13 +1147,12 @@ function SeccionDiagnosticoNombres() {
 
     // Nombres en la configuración actual
     const nombresConfig = ejercicios.map((e) => e.nombre).sort()
-    const normConfig = new Set(nombresConfig.map(normalizarNombre))
+    const canonConfig = new Set(nombresConfig.map(nombreCanonico))
 
-    // Sin match: nombres del historial que ni siquiera tras normalizar coinciden con algún ejercicio de config
+    // Sin match: nombres del historial que ni tras normalizar ni vía alias coinciden con algún ejercicio de config
     const sinMatch: string[] = []
     for (const nh of nombresHistorial) {
-      const normH = normalizarNombre(nh)
-      if (!normConfig.has(normH)) {
+      if (!canonConfig.has(nombreCanonico(nh))) {
         sinMatch.push(nh)
       }
     }
@@ -1213,8 +1213,8 @@ function SeccionDiagnosticoNombres() {
             </p>
             <ul className="flex flex-col gap-0.5 max-h-60 overflow-y-auto">
               {diagnostico.nombresHistorial.map((nombre) => {
-                const normH = normalizarNombre(nombre)
-                const tieneMatch = ejercicios.some((e) => normalizarNombre(e.nombre) === normH)
+                const canonH = nombreCanonico(nombre)
+                const tieneMatch = ejercicios.some((e) => nombreCanonico(e.nombre) === canonH)
                 return (
                   <li key={nombre} className="flex items-center gap-2 text-xs">
                     <span className={tieneMatch ? 'text-green-500' : 'text-red-500'}>
@@ -1244,6 +1244,139 @@ function SeccionDiagnosticoNombres() {
             </ul>
           </div>
 
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── SeccionRecuperarEjercicios ────────────────────────────────────────────────
+
+/**
+ * Ejercicios antiguos eliminados de la configuración cuyo historial dejó de
+ * mostrarse. El botón los vuelve a añadir a la config del usuario (v2.2.4).
+ */
+const EJERCICIOS_RECUPERABLES: string[] = [
+  'Abdominales',
+  'Abductores',
+  'Aductores',
+  'Aperturas',
+  'Cuadriceps sillón',
+  'Extensión de pierna',
+  'Prensa 45',
+  'Pull over polea alta',
+  'Sentadilla Hack',
+  'Subida al cajón / sentadilla',
+  'Triceps tras nuca a 1 brazo',
+]
+
+function SeccionRecuperarEjercicios() {
+  const historialSesiones = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const ejercicios        = useFitLogStore(useShallow((s) => s.ejercicios))
+  const agregarEjercicio  = useFitLogStore((s) => s.agregarEjercicio)
+  const [abierto, setAbierto]     = useState(false)
+  const [recuperados, setRecuperados] = useState<string[]>([])
+
+  // Ejercicios de la lista que aún no están en la configuración, con el día
+  // en el que más aparecen en el historial (día 1 si no hay sesiones de día 1-3)
+  const pendientes = useMemo(() => {
+    const canonConfig = new Set(ejercicios.map((e) => nombreCanonico(e.nombre)))
+    return EJERCICIOS_RECUPERABLES
+      .filter((n) => !canonConfig.has(nombreCanonico(n)))
+      .map((nombre) => {
+        const canonN = nombreCanonico(nombre)
+        const conteo: Record<DiaId, number> = { 1: 0, 2: 0, 3: 0 }
+        for (const ses of historialSesiones) {
+          if (typeof ses.dia !== 'number') continue
+          const aparece = ses.ejercicios.some((ej) => {
+            const n = ej.nombreSustituido ?? ej.nombreSnapshot
+            return n ? nombreCanonico(n) === canonN : false
+          })
+          if (aparece) conteo[ses.dia]++
+        }
+        const dia = ([1, 2, 3] as DiaId[]).reduce<DiaId>(
+          (best, d) => (conteo[d] > conteo[best] ? d : best),
+          1,
+        )
+        return { nombre, dia, sesiones: conteo[1] + conteo[2] + conteo[3] }
+      })
+  }, [ejercicios, historialSesiones])
+
+  const handleRecuperar = () => {
+    for (const p of pendientes) {
+      agregarEjercicio({ nombre: p.nombre, dia: p.dia, seriesPorDefecto: 3, notasFijas: '' })
+    }
+    setRecuperados(pendientes.map((p) => p.nombre))
+  }
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3">
+      <button
+        onClick={() => setAbierto((v) => !v)}
+        className="flex items-center justify-between gap-3 w-full"
+      >
+        <div className="flex items-center gap-3">
+          <div className="size-9 rounded-xl bg-emerald-900/30 flex items-center justify-center shrink-0">
+            <RefreshCw size={16} className="text-emerald-400" />
+          </div>
+          <div className="text-left">
+            <p className="text-sm font-bold text-white">Recuperar ejercicios antiguos</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              {pendientes.length === 0
+                ? 'Todos recuperados'
+                : `${pendientes.length} pendiente${pendientes.length !== 1 ? 's' : ''} de recuperar`}
+            </p>
+          </div>
+        </div>
+        <ChevronRight
+          size={16}
+          className={['text-zinc-600 transition-transform shrink-0', abierto ? 'rotate-90' : ''].join(' ')}
+        />
+      </button>
+
+      {abierto && (
+        <div className="flex flex-col gap-3 pt-2 border-t border-zinc-800">
+          <p className="text-xs text-zinc-500 leading-relaxed">
+            Vuelve a añadir a tu configuración los ejercicios antiguos que se eliminaron,
+            para que su historial se muestre en Tendencias. Cada uno se añade al final del
+            día en el que más veces aparece en tu historial; luego puedes moverlos o
+            borrarlos en «Ejercicios por día».
+          </p>
+
+          {recuperados.length > 0 && (
+            <div className="flex items-start gap-2 text-xs text-green-400">
+              <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
+              <span>Recuperados: {recuperados.join(', ')}</span>
+            </div>
+          )}
+
+          {pendientes.length === 0 ? (
+            recuperados.length === 0 && (
+              <p className="text-xs text-green-400">
+                Todos los ejercicios antiguos ya están en la configuración.
+              </p>
+            )
+          ) : (
+            <>
+              <ul className="flex flex-col gap-1">
+                {pendientes.map((p) => (
+                  <li key={p.nombre} className="flex items-center gap-2 text-xs">
+                    <span className="text-emerald-500 shrink-0">+</span>
+                    <span className="text-zinc-300 font-mono break-all">{p.nombre}</span>
+                    <span className="text-zinc-600 ml-auto shrink-0">
+                      → Día {p.dia}{p.sesiones > 0 ? ` (${p.sesiones} ses.)` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={handleRecuperar}
+                className="w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white active:bg-emerald-700 transition-colors"
+              >
+                Recuperar {pendientes.length} ejercicio{pendientes.length !== 1 ? 's' : ''}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

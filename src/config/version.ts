@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.3'
+export const APP_VERSION = '2.2.4'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.4',
+    fecha: '13/08/2026',
+    tipo: 'media',
+    cambios: [
+      'Nuevo sistema de alias de ejercicios (utils/aliasEjercicios.ts): nombres antiguos del historial → nombres actuales (Hip Thrust→HipTrust, Biceps→Bíceps con barra fija, Prensa 45º→Prensa 45, Presa de pierna→Press de pierna, etc.)',
+      'matchesEjercicio comprueba el alias cuando no hay match directo ni normalizado — Último entreno, Progreso de volumen, Tendencias y récords encuentran ahora el historial guardado con nombres antiguos',
+      'Herramienta "Matching de nombres" y diagnóstico de consola en Tendencias ahora tienen en cuenta los alias',
+      'Nueva herramienta "Recuperar ejercicios antiguos" en Ajustes → Diagnóstico: vuelve a añadir a la configuración los ejercicios eliminados (Abdominales, Abductores, Aductores, Aperturas, Cuadriceps sillón, Extensión de pierna, Prensa 45, Pull over polea alta, Sentadilla Hack, Subida al cajón / sentadilla, Triceps tras nuca a 1 brazo)',
+      'Cada ejercicio recuperado se añade al final del día en el que más aparece en el historial (día 1 si no hay datos) y se sincroniza a ejercicios_usuario en Supabase',
+    ],
+  },
   {
     version: '2.2.3',
     fecha: '29/06/2026',

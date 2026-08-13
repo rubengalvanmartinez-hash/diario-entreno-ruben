@@ -7,7 +7,7 @@ import { getUsuarioActivo, getIdActivo, actualizarSerieSupabase } from '../servi
 import { setEdicionEnCurso } from '../hooks/useSupabaseSync'
 import { generarInformePDF } from '../services/pdfReport'
 import type { Ejercicio, EtiquetaSerie, Sesion } from '../types/models'
-import { normalizarNombre, matchesEjercicio } from '../utils/normalizar'
+import { nombreCanonico, matchesEjercicio } from '../utils/normalizar'
 
 const MESES_ES_CORTO = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -426,27 +426,26 @@ export default function TendenciasPage() {
       }
     }
     const nombresConfig = ejercicios.map((e) => e.nombre)
-    const normConfig    = nombresConfig.map(normalizarNombre)
+    const canonConfig   = nombresConfig.map(nombreCanonico)
 
     const soloNormalizacion: string[] = []
     const sinMatch: string[] = []
 
     for (const nh of Array.from(nombresHistorial).sort()) {
-      const normH = normalizarNombre(nh)
       const matchExacto = nombresConfig.includes(nh)
-      const matchNorm   = normConfig.includes(normH)
-      if (!matchExacto && matchNorm) soloNormalizacion.push(nh)
-      if (!matchExacto && !matchNorm) sinMatch.push(nh)
+      const matchCanon  = canonConfig.includes(nombreCanonico(nh))
+      if (!matchExacto && matchCanon) soloNormalizacion.push(nh)
+      if (!matchExacto && !matchCanon) sinMatch.push(nh)
     }
 
     console.log('[fitlog] Nombres únicos en historial:', Array.from(nombresHistorial).sort())
     console.log('[fitlog] Nombres en configuración:',  nombresConfig.sort())
     if (soloNormalizacion.length > 0)
-      console.warn('[fitlog] Coinciden SOLO tras normalizar (tildes/mayúsculas):', soloNormalizacion)
+      console.warn('[fitlog] Coinciden SOLO tras normalizar o vía alias:', soloNormalizacion)
     if (sinMatch.length > 0)
-      console.error('[fitlog] Sin match ni siquiera normalizado (posibles typos):', sinMatch)
+      console.error('[fitlog] Sin match ni normalizado ni por alias (posibles typos):', sinMatch)
     else
-      console.log('[fitlog] Todos los nombres del historial tienen match (exacto o normalizado) ✓')
+      console.log('[fitlog] Todos los nombres del historial tienen match (exacto, normalizado o alias) ✓')
   }, [historialSesiones, ejercicios])
 
   const handleGenerarPDF = async () => {
