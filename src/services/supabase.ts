@@ -471,12 +471,16 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
   sesiones.sort((a, b) => b.fecha.localeCompare(a.fecha))
 
   // ── Reconstruir RegistroPeso[] ────────────────────────────────────────────
-  const registrosPeso: RegistroPeso[] = pesos.map((r) => ({
-    id: String(r.id ?? ''),
-    fecha: String(r.fecha ?? ''),
-    pesoKg: Number(r.peso_kg),
-    sincronizado: true,
-  }))
+  // La query los trae ascendentes por fecha; el store asume "más reciente
+  // primero" (registrarPeso hace prepend), así que se ordenan descendentes
+  const registrosPeso: RegistroPeso[] = pesos
+    .map((r) => ({
+      id: String(r.id ?? ''),
+      fecha: String(r.fecha ?? ''),
+      pesoKg: Number(r.peso_kg),
+      sincronizado: true,
+    }))
+    .sort((a, b) => b.fecha.localeCompare(a.fecha))
 
   return { sesiones, registrosPeso }
 }

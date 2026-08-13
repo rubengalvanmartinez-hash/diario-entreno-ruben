@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.7'
+export const APP_VERSION = '2.2.8'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.8',
+    fecha: '13/08/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: "Últimos registros" en /peso mostraba los registros MÁS ANTIGUOS tras cargar desde Supabase',
+      'Causa: cargarDatosUsuario traía registros_peso ascendentes por fecha, pero el store asume "más reciente primero" (registrarPeso hace prepend) — registrosPeso[0] era el más viejo',
+      'Afectaba también al "peso actual" usado por Composición corporal (calculaba IMC con el primer peso histórico)',
+      'Fix: los registros de peso se ordenan descendentes por fecha al reconstruirlos desde Supabase (igual que ya se hacía con las sesiones)',
+      'Verificado en la app con los datos reales: últimos registros 13/08 → 26/06 en orden correcto',
+    ],
+  },
   {
     version: '2.2.7',
     fecha: '13/08/2026',
