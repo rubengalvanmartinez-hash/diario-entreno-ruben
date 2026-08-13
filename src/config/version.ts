@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.5'
+export const APP_VERSION = '2.2.6'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.6',
+    fecha: '13/08/2026',
+    tipo: 'media',
+    cambios: [
+      'Sync a entrenos ya no sube ejercicios saltados ni guardados sin ningún dato real (series vacías) — origen de las filas con reps/peso null que rompían el "último entreno"',
+      'Aplica tanto al sync de sesión completa (al finalizar) como al sync por ejercicio ("Guardar y siguiente"); el DELETE previo sigue limpiando filas antiguas del ejercicio en esa sesión',
+      'serieConDatos() movida a types/models.ts y compartida entre SesionPage y el sync',
+      'Respaldo automático de la configuración de ejercicios: al abrir la app, si ejercicios_usuario está vacía en Supabase para el usuario activo, se sube la config local (antes solo existía en localStorage y se perdía al borrar caché o cambiar de dispositivo)',
+      'El respaldo nunca sobreescribe una config remota existente y no actúa cuando un admin está viendo el perfil de otro usuario',
+    ],
+  },
   {
     version: '2.2.5',
     fecha: '13/08/2026',

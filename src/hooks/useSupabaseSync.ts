@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { cargarDatosUsuario, getUsuarioActivo, RUBEN_UUID } from '../services/supabase'
+import { cargarDatosUsuario, getUsuarioActivo, RUBEN_UUID, respaldarConfigEjerciciosSiFalta } from '../services/supabase'
 import { useFitLogStore } from '../store/useFitLogStore'
 
 // ---------------------------------------------------------------------------
@@ -163,6 +163,12 @@ export function useSupabaseSync(): void {
     // Pull inmediato al montar
     pullHistorialInvitado()
     lastRef.current = Date.now()
+
+    // Respaldo único: si Supabase no tiene la config de ejercicios de este
+    // usuario (solo existía en localStorage), subirla ahora
+    respaldarConfigEjerciciosSiFalta().catch((e) =>
+      console.error('[Supabase] respaldarConfigEjerciciosSiFalta:', e),
+    )
 
     const loop = () => {
       const now     = Date.now()

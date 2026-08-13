@@ -13,6 +13,7 @@ import type {
   PerfilCorporal,
   CategoriaImc,
 } from '../types/models'
+import { serieConDatos } from '../types/models'
 import { DEFAULT_EJERCICIOS } from '../store/defaultData'
 import { useFitLogStore } from '../store/useFitLogStore'
 
@@ -304,7 +305,11 @@ export async function sincronizarEntrenoSupabase(
     // Continuar de todas formas — el INSERT podría seguir funcionando
   }
 
-  const rows = sesion.ejercicios.flatMap((ej) =>
+  // No subir ejercicios saltados ni guardados sin ningún dato real (series vacías):
+  // generaban filas con reps/peso null que ensuciaban el "último entreno"
+  const rows = sesion.ejercicios
+    .filter((ej) => ej.completado && !ej.saltado && ej.series.some(serieConDatos))
+    .flatMap((ej) =>
     ej.series.map((serie) => ({
       usuario_id: usuarioId,
       sesion_id: sesion.id,
@@ -345,7 +350,10 @@ export async function sincronizarEjercicioSupabase(
     .eq('sesion_id', sesion.id)
     .eq('ejercicio', nombreEj)
 
-  const rows = ejercicio.series.map((serie) => ({
+  // No subir el ejercicio si está saltado o no tiene ningún dato real
+  // (el DELETE previo ya limpia filas antiguas de este ejercicio en la sesión)
+  const sinDatos = ejercicio.saltado || !ejercicio.series.some(serieConDatos)
+  const rows = sinDatos ? [] : ejercicio.series.map((serie) => ({
     usuario_id: usuarioId,
     sesion_id: sesion.id,
     fecha: sesion.fecha,
@@ -524,6 +532,28 @@ export async function sincronizarEjerciciosUsuario(
   }))
   const { error: errIns } = await supabase.from('ejercicios_usuario').insert(rows)
   if (errIns) throw errIns
+}
+
+/**
+ * Respalda en Supabase la configuración local de ejercicios si la tabla
+ * ejercicios_usuario está vacía para el usuario activo (config que solo
+ * existía en localStorage). Nunca sobreescribe una config remota existente
+ * y no hace nada si un admin está viendo el perfil de otro usuario.
+ */
+export async function respaldarConfigEjerciciosSiFalta(): Promise<void> {
+  const usuario = getUsuarioActivo()
+  if (!usuario) return
+  if (getPerfilVisto()) return // el store contiene los ejercicios del perfil visto, no los propios
+  const ejerciciosLocales = useFitLogStore.getState().ejercicios
+  if (ejerciciosLocales.length === 0) return
+
+  const uid = usuario.esRuben ? getRubenUUID() : usuario.id
+  const remotos = await obtenerEjerciciosUsuario(uid)
+  if (remotos !== null) return // ya hay config remota — no tocar
+
+  if (usuario.esRuben) await asegurarUsuarioRuben() // FK entrenos/ejercicios → usuarios.id
+  await sincronizarEjerciciosUsuario(uid, ejerciciosLocales)
+  console.log(`[Supabase] Config de ejercicios respaldada en ejercicios_usuario (${ejerciciosLocales.length} ejercicios)`)
 }
 
 /**

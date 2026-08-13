@@ -102,6 +102,14 @@ export function crearSeriesVacias(cantidad: number): Serie[] {
   }))
 }
 
+/**
+ * true si la serie tiene algún dato real: reps > 0 o peso > 0.
+ * El peso 0 con reps es válido (ejercicios a peso corporal, ej. Dominadas).
+ */
+export function serieConDatos(s: Pick<Serie, 'reps' | 'pesoKg'>): boolean {
+  return (s.reps !== '' && Number(s.reps) > 0) || (s.pesoKg !== '' && Number(s.pesoKg) > 0)
+}
+
 /** Construye un SesionEjercicio inicial a partir de un Ejercicio */
 export function crearSesionEjercicio(ejercicio: Ejercicio): SesionEjercicio {
   return {

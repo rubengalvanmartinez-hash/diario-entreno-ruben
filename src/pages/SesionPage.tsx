@@ -5,7 +5,7 @@ import type { EtiquetaSerie, Sesion } from '../types/models'
 import { obtenerImagen } from '../services/imageDB'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectProgresoTotal, selectProgresoCompletados } from '../store/useFitLogStore'
-import type { DiaId, SesionEjercicio, Serie } from '../types/models'
+import { serieConDatos, type DiaId, type SesionEjercicio, type Serie } from '../types/models'
 import { getUsuarioActivo, sincronizarEntrenoSupabase, getRubenUUID, getPerfilVisto, getIdActivo, type UsuarioActivo } from '../services/supabase'
 import { pullHistorialInvitado } from '../hooks/useSupabaseSync'
 import { normalizarNombre, matchesEjercicio } from '../utils/normalizar'
@@ -134,14 +134,6 @@ function getPesoColor(
   if (mejor(num, prevNum)) return 'superado'
   if (peor(num, prevNum))  return 'bajo'
   return 'neutro'
-}
-
-/**
- * true si la serie tiene algún dato real: reps > 0 o peso > 0.
- * El peso 0 con reps es válido (ejercicios a peso corporal, ej. Dominadas).
- */
-function serieConDatos(s: { reps: number | ''; pesoKg: number | '' }): boolean {
-  return (s.reps !== '' && Number(s.reps) > 0) || (s.pesoKg !== '' && Number(s.pesoKg) > 0)
 }
 
 function formatFechaCorta(iso: string): string {
