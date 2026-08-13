@@ -136,6 +136,14 @@ function getPesoColor(
   return 'neutro'
 }
 
+/**
+ * true si la serie tiene algún dato real: reps > 0 o peso > 0.
+ * El peso 0 con reps es válido (ejercicios a peso corporal, ej. Dominadas).
+ */
+function serieConDatos(s: { reps: number | ''; pesoKg: number | '' }): boolean {
+  return (s.reps !== '' && Number(s.reps) > 0) || (s.pesoKg !== '' && Number(s.pesoKg) > 0)
+}
+
 function formatFechaCorta(iso: string): string {
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`
@@ -484,7 +492,9 @@ function EjercicioCard({
       const ej = sesion.ejercicios.find(
         (e) => matchesEjercicio(e, ejercicio.ejercicioId, nombre) && e.completado && !e.saltado,
       )
-      if (ej) {
+      // Saltar sesiones donde el ejercicio se guardó sin ningún dato real
+      // (todas las series vacías) — seguir buscando hacia atrás la última con datos
+      if (ej && ej.series.some(serieConDatos)) {
         encontrados.push({ fecha: sesion.fecha, series: ej.series, ayudaFede: ej.ayudaFede ?? false })
         if (encontrados.length === 2) break
       }
@@ -942,9 +952,8 @@ function UltimoEntrenoCard({
     )
   }
 
-  const seriesValidas = ultimoEntreno.series.filter(
-    (s) => s.pesoKg !== '' && Number(s.pesoKg) > 0 && s.reps !== '' && Number(s.reps) > 0,
-  )
+  // Serie válida = tiene reps o peso (peso 0 con reps es peso corporal, ej. Dominadas)
+  const seriesValidas = ultimoEntreno.series.filter(serieConDatos)
 
   // Comparar peso objetivo con peso máximo actual
   const pesoMaxActual = seriesActuales
@@ -1021,10 +1030,10 @@ function UltimoEntrenoCard({
                   {i > 0 && <div className="w-px h-3.5 bg-zinc-600 mx-1.5 shrink-0" />}
                   <div className="flex items-center gap-[3px] shrink-0">
                     <span className="text-[10px] font-bold text-violet-400">S{s.numero}</span>
-                    <span className="text-sm font-bold text-white tabular-nums">{s.pesoKg}</span>
+                    <span className="text-sm font-bold text-white tabular-nums">{s.pesoKg === '' ? '—' : s.pesoKg}</span>
                     <span className="text-[10px] text-zinc-500">kg</span>
                     <span className="text-[10px] text-zinc-500 mx-px">×</span>
-                    <span className="text-sm text-emerald-400 tabular-nums">{s.reps}</span>
+                    <span className="text-sm text-emerald-400 tabular-nums">{s.reps === '' ? '—' : s.reps}</span>
                     {s.etiqueta && (
                       <div className={`w-1.5 h-1.5 rounded-full ml-0.5 shrink-0 ${ETIQUETA_DOT[s.etiqueta]}`} />
                     )}
@@ -1478,9 +1487,11 @@ function generarTextoWhatsApp(
     const ejNombre    = ej.nombreSustituido ?? ej.nombreSnapshot
     const ultimoHist = historialOrdenado.reduce<SesionEjercicio | null>((acc, ses) => {
       if (acc) return acc
-      return ses.ejercicios.find(
+      const encontrado = ses.ejercicios.find(
         (e) => matchesEjercicio(e, ej.ejercicioId, ejNombre) && e.completado && !e.saltado,
-      ) ?? null
+      )
+      // Ignorar sesiones donde el ejercicio se guardó sin datos (series vacías)
+      return encontrado && encontrado.series.some(serieConDatos) ? encontrado : null
     }, null)
     const maxHist     = ultimoHist ? pesoMax(ultimoHist.series) : null
     const maxActual   = pesoMax(ej.series)

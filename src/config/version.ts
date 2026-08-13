@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.4'
+export const APP_VERSION = '2.2.5'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.2.5',
+    fecha: '13/08/2026',
+    tipo: 'media',
+    cambios: [
+      'BUG: "Último entreno" en sesión no aparecía para algunos ejercicios (Dominadas, Oblicuos polea, Extensión de cuádriceps, …) aunque Tendencias sí mostraba su historial',
+      'Causa 1: ejercicios a peso corporal (peso 0 con reps, ej. Dominadas) — el filtro exigía peso > 0 y descartaba todas las series → "Sin datos registrados"',
+      'Causa 2: si la sesión más reciente contenía el ejercicio guardado sin datos (series vacías), se usaba esa sesión vacía en lugar de seguir buscando hacia atrás la última con datos',
+      'Fix: serieConDatos() — una serie es válida con reps > 0 o peso > 0; el bucle de último/penúltimo entreno salta sesiones sin datos reales',
+      'El récord del resumen de WhatsApp también ignora sesiones guardadas sin datos',
+      'Chips de series muestran "—" cuando falta el peso o las reps en vez de quedar en blanco',
+    ],
+  },
   {
     version: '2.2.4',
     fecha: '13/08/2026',
