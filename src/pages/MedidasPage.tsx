@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, BarChart2, Trash2, Check, X, Ruler, Save } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
-import { Trash2 } from 'lucide-react'
-import { getUsuarioActivo, getIdActivo, guardarMedidas, eliminarMedidasSupabase } from '../services/supabase'
+import { getUsuarioActivo, getIdActivo, guardarMedidas, eliminarMedidasPorFecha } from '../services/supabase'
 import type { RegistroMedidas } from '../types/models'
 
 // ── Configuración de campos ───────────────────────────────────────────────────
@@ -13,26 +12,31 @@ type CampoKey = keyof Omit<RegistroMedidas, 'id' | 'fecha'>
 
 interface CampoConfig {
   key: CampoKey
+  /** Etiqueta corta (figura y tabla) */
   label: string
+  /** Nombre completo (wizard) */
+  nombre: string
+  /** Dónde/cómo medir (wizard) */
+  tip: string
   side: 'L' | 'R'
   /** Y relativa en el SVG (0–1, donde 1 = fondo = y=280) */
   yFrac: number
 }
 
 const CAMPOS: CampoConfig[] = [
-  { key: 'cuello',         label: 'Cuello',      side: 'L', yFrac: 33 / 280 },
-  { key: 'hombro',         label: 'Hombro',       side: 'R', yFrac: 40 / 280 },
-  { key: 'pecho',          label: 'Pecho',         side: 'L', yFrac: 65 / 280 },
-  { key: 'bicepsIzq',      label: 'Bíc. Izq',    side: 'L', yFrac: 90 / 280 },
-  { key: 'bicepsDer',      label: 'Bíc. Der',    side: 'R', yFrac: 90 / 280 },
-  { key: 'cinturaAlta',    label: 'Cin. Alta',   side: 'L', yFrac: 115 / 280 },
-  { key: 'abdomen',        label: 'Abdomen',      side: 'R', yFrac: 128 / 280 },
-  { key: 'cinturaBaja',    label: 'Cin. Baja',   side: 'L', yFrac: 145 / 280 },
-  { key: 'cadera',         label: 'Cadera',       side: 'R', yFrac: 162 / 280 },
-  { key: 'musloIzq',       label: 'Muslo Izq',   side: 'L', yFrac: 200 / 280 },
-  { key: 'musloDer',       label: 'Muslo Der',   side: 'R', yFrac: 200 / 280 },
-  { key: 'pantorrillaIzq', label: 'Pant. Izq',  side: 'L', yFrac: 245 / 280 },
-  { key: 'pantorrillaDer', label: 'Pant. Der',  side: 'R', yFrac: 245 / 280 },
+  { key: 'cuello',         label: 'Cuello',     nombre: 'Cuello',               tip: 'Justo por debajo de la nuez, cinta horizontal y sin apretar.',                side: 'L', yFrac: 33 / 280 },
+  { key: 'hombro',         label: 'Hombro',     nombre: 'Hombros',              tip: 'Contorno completo a la altura de los deltoides, brazos relajados.',          side: 'R', yFrac: 40 / 280 },
+  { key: 'pecho',          label: 'Pecho',      nombre: 'Pecho',                tip: 'A la altura de los pezones, al final de una espiración normal.',             side: 'L', yFrac: 65 / 280 },
+  { key: 'bicepsIzq',      label: 'Bíc. Izq',   nombre: 'Bíceps izquierdo',     tip: 'Brazo flexionado y contraído, en el punto más grueso.',                      side: 'L', yFrac: 90 / 280 },
+  { key: 'bicepsDer',      label: 'Bíc. Der',   nombre: 'Bíceps derecho',       tip: 'Brazo flexionado y contraído, en el punto más grueso.',                      side: 'R', yFrac: 90 / 280 },
+  { key: 'cinturaAlta',    label: 'Cin. Alta',  nombre: 'Cintura alta',         tip: 'En la parte más estrecha del torso, por encima del ombligo.',                side: 'L', yFrac: 115 / 280 },
+  { key: 'abdomen',        label: 'Abdomen',    nombre: 'Abdomen',              tip: 'A la altura del ombligo, relajado, sin meter tripa.',                        side: 'R', yFrac: 128 / 280 },
+  { key: 'cinturaBaja',    label: 'Cin. Baja',  nombre: 'Cintura baja',         tip: 'Unos 5 cm por debajo del ombligo, cinta horizontal.',                        side: 'L', yFrac: 145 / 280 },
+  { key: 'cadera',         label: 'Cadera',     nombre: 'Cadera',               tip: 'En la parte más ancha de los glúteos, pies juntos.',                         side: 'R', yFrac: 162 / 280 },
+  { key: 'musloIzq',       label: 'Muslo Izq',  nombre: 'Muslo izquierdo',      tip: 'En la parte más gruesa, justo debajo del glúteo, de pie y relajado.',        side: 'L', yFrac: 200 / 280 },
+  { key: 'musloDer',       label: 'Muslo Der',  nombre: 'Muslo derecho',        tip: 'En la parte más gruesa, justo debajo del glúteo, de pie y relajado.',        side: 'R', yFrac: 200 / 280 },
+  { key: 'pantorrillaIzq', label: 'Pant. Izq',  nombre: 'Pantorrilla izquierda', tip: 'En el punto más grueso del gemelo, de pie con el peso repartido.',          side: 'L', yFrac: 245 / 280 },
+  { key: 'pantorrillaDer', label: 'Pant. Der',  nombre: 'Pantorrilla derecha',  tip: 'En el punto más grueso del gemelo, de pie con el peso repartido.',           side: 'R', yFrac: 245 / 280 },
 ]
 
 const CAMPOS_IZQ = CAMPOS.filter((c) => c.side === 'L')
@@ -172,6 +176,7 @@ export default function MedidasPage() {
   const [guardando, setGuardando] = useState(false)
   const [msg,       setMsg]       = useState('')
   const [histOpen,  setHistOpen]  = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
 
   // Guard: solo para usuarios con puede_peso_corporal
   useEffect(() => {
@@ -258,6 +263,21 @@ export default function MedidasPage() {
 
       {/* Cuerpo principal */}
       <div className="flex-1 overflow-y-auto">
+
+        {/* ── Wizard paso a paso ── */}
+        <div className="mx-4 mt-4">
+          <button
+            onClick={() => setWizardOpen(true)}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 py-3.5
+                       text-sm font-bold text-white active:bg-emerald-700"
+          >
+            <Ruler size={16} />
+            Introducir medidas paso a paso
+          </button>
+          <p className="text-[11px] text-zinc-600 text-center mt-1.5">
+            O rellena directamente los campos sobre la figura
+          </p>
+        </div>
 
         {/* ── Selector de fecha ── */}
         <div className="mx-4 mt-4 mb-1 flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3">
@@ -389,103 +409,427 @@ export default function MedidasPage() {
           </button>
 
           {histOpen && (
-            <div className="flex flex-col gap-2 mt-1">
-              {historialMedidas.length === 0 && (
+            <div className="mt-1">
+              {historialMedidas.length === 0 ? (
                 <p className="text-xs text-zinc-600 text-center py-4">Sin registros aún</p>
-              )}
-              {historialMedidas.slice(0, 20).map((r) => (
-                <HistorialItem
-                  key={r.id}
-                  registro={r}
-                  onEliminar={async () => {
+              ) : (
+                <TablaMedidas
+                  registros={historialMedidas}
+                  onGuardar={async (registro) => {
+                    const uid = getIdActivo()
+                    if (!uid) throw new Error('Sin sesión activa')
+                    await guardarMedidas(uid, registro)
+                    guardarMedidasLocales(registro)
+                  }}
+                  onEliminar={async (r) => {
                     const uid = getIdActivo()
                     if (uid) {
-                      try { await eliminarMedidasSupabase(uid, r.id) } catch { /* offline OK */ }
+                      try { await eliminarMedidasPorFecha(uid, r.fecha) } catch { /* offline OK */ }
                     }
                     eliminarMedidasLocales(r.id)
                   }}
                 />
-              ))}
+              )}
             </div>
           )}
         </div>
 
       </div>
+
+      {/* ── Wizard ── */}
+      {wizardOpen && (
+        <WizardMedidas
+          ultima={ultima}
+          onCerrar={() => setWizardOpen(false)}
+          onGuardar={async (registro) => {
+            const uid = getIdActivo()
+            if (!uid) throw new Error('Sin sesión activa')
+            await guardarMedidas(uid, registro)
+            guardarMedidasLocales(registro)
+            setMsg('✅ Medidas guardadas')
+            setHistOpen(true)
+          }}
+        />
+      )}
     </div>
   )
 }
 
-// ── HistorialItem ─────────────────────────────────────────────────────────────
+// ── TablaMedidas ──────────────────────────────────────────────────────────────
+// Medidas en filas, una columna por fecha (más reciente primero). Celdas
+// editables; al modificar una columna aparece "Guardar" en su cabecera.
 
-function HistorialItem({
-  registro,
+function TablaMedidas({
+  registros,
+  onGuardar,
   onEliminar,
 }: {
-  registro: RegistroMedidas
-  onEliminar: () => Promise<void>
+  registros: RegistroMedidas[]
+  onGuardar: (registro: Omit<RegistroMedidas, 'id'>) => Promise<void>
+  onEliminar: (registro: RegistroMedidas) => Promise<void>
 }) {
-  const [confirmando, setConfirmando] = useState(false)
-  const [borrando,    setBorrando]    = useState(false)
+  // edits[id][campo] = texto en edición (solo celdas tocadas)
+  const [edits,       setEdits]       = useState<Record<string, Partial<Record<CampoKey, string>>>>({})
+  const [guardandoId, setGuardandoId] = useState<string | null>(null)
+  const [confirmarId, setConfirmarId] = useState<string | null>(null)
+  const [error,       setError]       = useState('')
 
-  const campos: Array<{ label: string; val?: number }> = [
-    { label: 'Cuello',    val: registro.cuello         },
-    { label: 'Hombro',    val: registro.hombro         },
-    { label: 'Pecho',     val: registro.pecho          },
-    { label: 'Bíc.Izq',  val: registro.bicepsIzq      },
-    { label: 'Bíc.Der',  val: registro.bicepsDer      },
-    { label: 'Cin.Alta',  val: registro.cinturaAlta    },
-    { label: 'Abdomen',   val: registro.abdomen        },
-    { label: 'Cin.Baja',  val: registro.cinturaBaja    },
-    { label: 'Cadera',    val: registro.cadera         },
-    { label: 'Muslo Izq', val: registro.musloIzq       },
-    { label: 'Muslo Der', val: registro.musloDer       },
-    { label: 'Pant.Izq',  val: registro.pantorrillaIzq },
-    { label: 'Pant.Der',  val: registro.pantorrillaDer },
-  ].filter((c) => c.val != null)
+  const setCelda = (id: string, key: CampoKey, v: string) =>
+    setEdits((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), [key]: v } }))
 
-  const handleBorrar = async () => {
-    setBorrando(true)
-    try { await onEliminar() } finally { setBorrando(false) }
+  const descartar = (id: string) =>
+    setEdits((prev) => { const next = { ...prev }; delete next[id]; return next })
+
+  const guardarColumna = async (r: RegistroMedidas) => {
+    const cambios = edits[r.id] ?? {}
+    const registro: Omit<RegistroMedidas, 'id'> = { fecha: r.fecha }
+    for (const c of CAMPOS) {
+      const texto = cambios[c.key]
+      // Celda tocada → valor nuevo (vacío = borrar medida); no tocada → valor actual
+      registro[c.key] = texto !== undefined ? parseNum(texto) : r[c.key]
+    }
+    setGuardandoId(r.id)
+    setError('')
+    try {
+      await onGuardar(registro)
+      descartar(r.id)
+    } catch (e) {
+      console.error('[TablaMedidas] Error guardando:', e)
+      setError('❌ No se pudo guardar — revisa la conexión')
+    } finally {
+      setGuardandoId(null)
+    }
+  }
+
+  const fechaCorta = (iso: string) => {
+    const [y, m, d] = iso.split('-')
+    return `${d}/${m}/${y.slice(2)}`
   }
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-bold text-zinc-400">{formatFechaES(registro.fecha)}</p>
-        {!confirmando ? (
-          <button
-            onClick={() => setConfirmando(true)}
-            className="p-1 text-zinc-600 active:text-red-400"
-          >
-            <Trash2 size={14} />
-          </button>
-        ) : (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-zinc-500">¿Eliminar?</span>
-            <button
-              onClick={handleBorrar}
-              disabled={borrando}
-              className="text-[10px] font-bold text-red-400 active:text-red-300 disabled:opacity-50"
-            >
-              {borrando ? '…' : 'Sí'}
-            </button>
-            <button
-              onClick={() => setConfirmando(false)}
-              className="text-[10px] font-bold text-zinc-500 active:text-zinc-300"
-            >
-              No
-            </button>
+    <div className="flex flex-col gap-2">
+      <p className="text-[11px] text-zinc-600">
+        Toca una celda para editarla. Desliza para ver más fechas.
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900">
+        <table className="border-separate border-spacing-0 text-xs">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-20 bg-zinc-900 text-left font-semibold text-zinc-500 px-3 py-2 border-b border-r border-zinc-800 min-w-[5.5rem]">
+                Medida
+              </th>
+              {registros.map((r) => {
+                const dirty = edits[r.id] !== undefined && Object.keys(edits[r.id]).length > 0
+                const guardando = guardandoId === r.id
+                return (
+                  <th key={r.id} className="px-1.5 py-1.5 border-b border-zinc-800 min-w-[4.5rem] align-top">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="font-bold text-zinc-300 tabular-nums whitespace-nowrap">{fechaCorta(r.fecha)}</span>
+                      {dirty ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => guardarColumna(r)}
+                            disabled={guardando}
+                            className="flex items-center gap-0.5 rounded-md bg-emerald-600 text-white px-1.5 py-0.5 text-[10px] font-bold active:bg-emerald-700 disabled:opacity-50"
+                          >
+                            <Save size={10} />{guardando ? '…' : 'Guardar'}
+                          </button>
+                          <button onClick={() => descartar(r.id)} className="p-0.5 text-zinc-500 active:text-white" aria-label="Descartar cambios">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : confirmarId === r.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={async () => { await onEliminar(r); setConfirmarId(null) }}
+                            className="rounded-md bg-red-600 text-white px-1.5 py-0.5 text-[10px] font-bold active:bg-red-700"
+                          >
+                            Borrar
+                          </button>
+                          <button onClick={() => setConfirmarId(null)} className="p-0.5 text-zinc-500 active:text-white" aria-label="Cancelar">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setConfirmarId(r.id)} className="p-0.5 text-zinc-600 active:text-red-400" aria-label={`Eliminar ${fechaCorta(r.fecha)}`}>
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+                )
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {CAMPOS.map((c) => (
+              <tr key={c.key}>
+                <td className="sticky left-0 z-10 bg-zinc-900 text-zinc-400 font-medium px-3 py-1 border-b border-r border-zinc-800/70 whitespace-nowrap">
+                  {c.label}
+                </td>
+                {registros.map((r) => {
+                  const editado = edits[r.id]?.[c.key]
+                  const valor   = editado !== undefined ? editado : (r[c.key]?.toString() ?? '')
+                  const tocada  = editado !== undefined
+                  return (
+                    <td key={r.id} className="px-1 py-0.5 border-b border-zinc-800/70">
+                      <input
+                        inputMode="decimal"
+                        value={valor}
+                        onChange={(e) => setCelda(r.id, c.key, e.target.value)}
+                        placeholder="—"
+                        aria-label={`${c.nombre} ${fechaCorta(r.fecha)}`}
+                        className={[
+                          'w-16 rounded-md px-1.5 py-1 text-xs text-right tabular-nums text-white',
+                          'bg-transparent border placeholder:text-zinc-700 focus:outline-none focus:border-blue-500',
+                          tocada ? 'border-emerald-500/70 bg-emerald-500/10' : 'border-transparent focus:bg-zinc-800',
+                        ].join(' ')}
+                      />
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── WizardMedidas ─────────────────────────────────────────────────────────────
+// Asistente a pantalla completa: fecha → una medida por paso (cm) → resumen.
+
+function WizardMedidas({
+  ultima,
+  onCerrar,
+  onGuardar,
+}: {
+  ultima: RegistroMedidas | null
+  onCerrar: () => void
+  onGuardar: (registro: Omit<RegistroMedidas, 'id'>) => Promise<void>
+}) {
+  const hoy = new Date().toISOString().slice(0, 10)
+  const [fecha,   setFecha]   = useState(hoy)
+  // paso 0 = fecha; 1..CAMPOS.length = medidas; CAMPOS.length+1 = resumen
+  const [paso,    setPaso]    = useState(0)
+  const [valores, setValores] = useState<Partial<Record<CampoKey, string>>>({})
+  const [guardando, setGuardando] = useState(false)
+  const [error,     setError]     = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const totalPasos = CAMPOS.length
+  const campo      = paso >= 1 && paso <= totalPasos ? CAMPOS[paso - 1] : null
+  const enResumen  = paso === totalPasos + 1
+
+  useEffect(() => {
+    // Enfocar el input al cambiar de paso (tras el render)
+    const t = setTimeout(() => inputRef.current?.focus(), 50)
+    return () => clearTimeout(t)
+  }, [paso])
+
+  const siguiente = () => setPaso((p) => Math.min(p + 1, totalPasos + 1))
+  const atras     = () => setPaso((p) => Math.max(p - 1, 0))
+
+  const rellenas = CAMPOS.filter((c) => parseNum(valores[c.key] ?? '') !== undefined).length
+
+  const guardar = async () => {
+    const registro: Omit<RegistroMedidas, 'id'> = { fecha }
+    for (const c of CAMPOS) registro[c.key] = parseNum(valores[c.key] ?? '')
+    setGuardando(true)
+    setError('')
+    try {
+      await onGuardar(registro)
+      onCerrar()
+    } catch (e) {
+      console.error('[WizardMedidas] Error guardando:', e)
+      setError('❌ No se pudo guardar — revisa la conexión')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  const valorActual = campo ? (valores[campo.key] ?? '') : ''
+  const anterior    = campo ? ultima?.[campo.key] : undefined
+  const numActual   = parseNum(valorActual)
+  const diff        = numActual !== undefined && anterior !== undefined ? numActual - anterior : null
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black text-white flex flex-col">
+      {/* Cabecera + progreso */}
+      <header className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800/60">
+        <button onClick={onCerrar} className="p-1 -ml-1 text-zinc-400 active:text-white" aria-label="Cerrar">
+          <X size={22} />
+        </button>
+        <div className="flex-1">
+          <p className="text-sm font-bold leading-tight">Medidas paso a paso</p>
+          <p className="text-[11px] text-zinc-500">
+            {paso === 0 ? 'Fecha de la medición' : enResumen ? 'Resumen' : `Medida ${paso} de ${totalPasos}`}
+          </p>
+        </div>
+        <span className="text-[11px] text-zinc-500 tabular-nums">{rellenas}/{totalPasos}</span>
+      </header>
+      <div className="h-1 bg-zinc-900">
+        <div
+          className="h-full bg-emerald-500 transition-all"
+          style={{ width: `${(Math.min(paso, totalPasos + 1) / (totalPasos + 1)) * 100}%` }}
+        />
+      </div>
+
+      {/* Contenido */}
+      <div className="flex-1 overflow-y-auto px-6 pt-8 pb-4">
+        {paso === 0 && (
+          <div className="flex flex-col items-center gap-6">
+            <div className="size-16 rounded-full bg-emerald-500/15 flex items-center justify-center">
+              <Ruler size={30} className="text-emerald-400" />
+            </div>
+            <div className="text-center">
+              <h2 className="text-xl font-black">¿De qué día son las medidas?</h2>
+              <p className="text-sm text-zinc-500 mt-1">Después irás midiendo una zona cada vez.</p>
+            </div>
+            <input
+              ref={inputRef}
+              type="date"
+              value={fecha}
+              max={hoy}
+              onChange={(e) => { if (e.target.value) setFecha(e.target.value) }}
+              className="bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-3 text-lg text-white
+                         focus:outline-none focus:border-emerald-500"
+            />
+            {ultima && (
+              <p className="text-xs text-zinc-600 text-center">
+                Última medición guardada: {formatFechaES(ultima.fecha)}
+              </p>
+            )}
+          </div>
+        )}
+
+        {campo && (
+          <div className="flex flex-col items-center gap-6">
+            <div className="text-center">
+              <h2 className="text-2xl font-black">{campo.nombre}</h2>
+              <p className="text-sm text-zinc-400 mt-2 leading-relaxed max-w-xs">{campo.tip}</p>
+            </div>
+
+            <div className="flex items-end gap-3">
+              <input
+                ref={inputRef}
+                inputMode="decimal"
+                value={valorActual}
+                onChange={(e) => setValores((prev) => ({ ...prev, [campo.key]: e.target.value }))}
+                onKeyDown={(e) => e.key === 'Enter' && siguiente()}
+                placeholder={anterior !== undefined ? String(anterior) : '0.0'}
+                className="w-40 bg-transparent text-right text-6xl font-black text-white
+                           border-b-2 border-zinc-700 focus:border-emerald-500 focus:outline-none
+                           pb-1 placeholder-zinc-800"
+              />
+              <span className="text-2xl font-bold text-zinc-500 pb-2">cm</span>
+            </div>
+
+            <div className="h-6 text-center">
+              {anterior !== undefined && (
+                <p className="text-xs text-zinc-500">
+                  Anterior: <span className="text-zinc-300 font-semibold">{anterior} cm</span>
+                  {diff !== null && Math.abs(diff) >= 0.05 && (
+                    <span className={['ml-2 font-bold', diff > 0 ? 'text-emerald-400' : 'text-red-400'].join(' ')}>
+                      {diff > 0 ? '+' : ''}{diff.toFixed(1)} cm
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+
+            {/* Mini-índice de pasos */}
+            <div className="flex flex-wrap justify-center gap-1.5 max-w-xs">
+              {CAMPOS.map((c, i) => {
+                const hecho = parseNum(valores[c.key] ?? '') !== undefined
+                const actual = i === paso - 1
+                return (
+                  <button
+                    key={c.key}
+                    onClick={() => setPaso(i + 1)}
+                    className={[
+                      'size-2.5 rounded-full transition-colors',
+                      actual ? 'bg-emerald-400 scale-125' : hecho ? 'bg-emerald-700' : 'bg-zinc-700',
+                    ].join(' ')}
+                    aria-label={c.nombre}
+                  />
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {enResumen && (
+          <div className="flex flex-col gap-4">
+            <div className="text-center">
+              <h2 className="text-xl font-black">Resumen · {formatFechaES(fecha)}</h2>
+              <p className="text-sm text-zinc-500 mt-1">
+                {rellenas} de {totalPasos} medidas. Toca una para corregirla.
+              </p>
+            </div>
+            <ul className="flex flex-col gap-1.5">
+              {CAMPOS.map((c, i) => {
+                const n = parseNum(valores[c.key] ?? '')
+                const prev = ultima?.[c.key]
+                const d = n !== undefined && prev !== undefined ? n - prev : null
+                return (
+                  <li key={c.key}>
+                    <button
+                      onClick={() => setPaso(i + 1)}
+                      className="w-full flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 active:bg-zinc-800"
+                    >
+                      <span className="text-sm text-zinc-300">{c.nombre}</span>
+                      <span className="flex items-baseline gap-2">
+                        {d !== null && Math.abs(d) >= 0.05 && (
+                          <span className={['text-[11px] font-semibold tabular-nums', d > 0 ? 'text-emerald-400' : 'text-red-400'].join(' ')}>
+                            {d > 0 ? '+' : ''}{d.toFixed(1)}
+                          </span>
+                        )}
+                        <span className={['text-sm font-bold tabular-nums', n !== undefined ? 'text-white' : 'text-zinc-600'].join(' ')}>
+                          {n !== undefined ? `${n} cm` : '—'}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+            {error && <p className="text-xs text-red-400 text-center">{error}</p>}
           </div>
         )}
       </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {campos.map((c) => (
-          <span key={c.label} className="text-xs text-zinc-300">
-            <span className="text-zinc-500">{c.label}</span>{' '}
-            <span className="font-semibold tabular-nums">{c.val}</span>
-            <span className="text-zinc-600">cm</span>
-          </span>
-        ))}
+
+      {/* Navegación */}
+      <div className="px-5 pb-6 pt-3 border-t border-zinc-800/60 flex items-center gap-2">
+        <button
+          onClick={atras}
+          disabled={paso === 0}
+          className="flex items-center gap-1 rounded-2xl bg-zinc-800 px-4 py-3 text-sm font-bold text-zinc-300
+                     active:bg-zinc-700 disabled:opacity-40"
+        >
+          <ChevronLeft size={16} /> Atrás
+        </button>
+        {!enResumen ? (
+          <button
+            onClick={siguiente}
+            className="flex-1 flex items-center justify-center gap-1 rounded-2xl bg-emerald-600 py-3 text-sm font-bold text-white active:bg-emerald-700"
+          >
+            {campo && valorActual.trim() === '' ? 'Saltar' : 'Siguiente'} <ChevronRight size={16} />
+          </button>
+        ) : (
+          <button
+            onClick={guardar}
+            disabled={guardando || rellenas === 0}
+            className="flex-1 flex items-center justify-center gap-2 rounded-2xl bg-blue-600 py-3 text-sm font-bold text-white
+                       active:bg-blue-700 disabled:opacity-50"
+          >
+            <Check size={16} strokeWidth={2.5} />
+            {guardando ? 'Guardando…' : `Guardar ${rellenas} medida${rellenas !== 1 ? 's' : ''}`}
+          </button>
+        )}
       </div>
     </div>
   )

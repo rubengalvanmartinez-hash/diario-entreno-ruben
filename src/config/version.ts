@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.8'
+export const APP_VERSION = '2.2.9'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -11,8 +11,23 @@ export interface EntradaChangelog {
 
 export const CHANGELOG: EntradaChangelog[] = [
   {
+    version: '2.2.9',
+    fecha: '23/08/2026',
+    tipo: 'mayor',
+    cambios: [
+      'Peso: "Últimos registros" muestra 5 y un botón "Ver todos (N)" despliega la lista completa de pesos con fecha dd/mm/yyyy, agrupada por mes y con la diferencia respecto al registro anterior',
+      'Medidas: el historial es ahora una TABLA EDITABLE — medidas en filas, una columna por fecha (más reciente primero), scroll horizontal entre fechas con la columna de etiquetas fija',
+      'Tabla: al tocar una celda y cambiarla aparece "Guardar" en la cabecera de esa fecha (guarda la columna completa; vaciar una celda borra esa medida) y una X para descartar; borrado por fecha con confirmación',
+      'Medidas: nuevo WIZARD "Introducir medidas paso a paso" — fecha → una medida por pantalla con input grande en cm, consejo de dónde medir, valor anterior de referencia y diferencia → resumen editable → guardar',
+      'Wizard: Enter avanza, "Saltar" si se deja vacía, puntos de progreso para ir a cualquier medida, se queda abierto si falla el guardado para no perder nada',
+      'Fix: el wizard se muestra por encima de la barra de navegación inferior (misma z-index que el nav → los botones inferiores quedaban tapados)',
+      'Supabase: eliminarMedidasPorFecha() — borrar medidas por fecha es robusto aunque el id local (nanoid) no coincida con el remoto (uuid)',
+      'Changelog: fechas de 2.2.4–2.2.8 corregidas a 23/08/2026',
+    ],
+  },
+  {
     version: '2.2.8',
-    fecha: '13/08/2026',
+    fecha: '23/08/2026',
     tipo: 'menor',
     cambios: [
       'BUG: "Últimos registros" en /peso mostraba los registros MÁS ANTIGUOS tras cargar desde Supabase',
@@ -24,7 +39,7 @@ export const CHANGELOG: EntradaChangelog[] = [
   },
   {
     version: '2.2.7',
-    fecha: '13/08/2026',
+    fecha: '23/08/2026',
     tipo: 'media',
     cambios: [
       'FIX de seguridad sobre v2.2.6: el respaldo de config ya NO sube la configuración semilla sin personalizar (esConfigPorDefecto) — en un dispositivo nuevo habría subido los 18 ejercicios por defecto y machacado la config real de Rubén en su siguiente login',
@@ -35,7 +50,7 @@ export const CHANGELOG: EntradaChangelog[] = [
   },
   {
     version: '2.2.6',
-    fecha: '13/08/2026',
+    fecha: '23/08/2026',
     tipo: 'media',
     cambios: [
       'Sync a entrenos ya no sube ejercicios saltados ni guardados sin ningún dato real (series vacías) — origen de las filas con reps/peso null que rompían el "último entreno"',
@@ -47,7 +62,7 @@ export const CHANGELOG: EntradaChangelog[] = [
   },
   {
     version: '2.2.5',
-    fecha: '13/08/2026',
+    fecha: '23/08/2026',
     tipo: 'media',
     cambios: [
       'BUG: "Último entreno" en sesión no aparecía para algunos ejercicios (Dominadas, Oblicuos polea, Extensión de cuádriceps, …) aunque Tendencias sí mostraba su historial',
@@ -60,7 +75,7 @@ export const CHANGELOG: EntradaChangelog[] = [
   },
   {
     version: '2.2.4',
-    fecha: '13/08/2026',
+    fecha: '23/08/2026',
     tipo: 'media',
     cambios: [
       'Nuevo sistema de alias de ejercicios (utils/aliasEjercicios.ts): nombres antiguos del historial → nombres actuales (Hip Thrust→HipTrust, Biceps→Bíceps con barra fija, Prensa 45º→Prensa 45, Presa de pierna→Press de pierna, etc.)',

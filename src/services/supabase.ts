@@ -816,6 +816,23 @@ export async function eliminarMedidasSupabase(
   if (error) throw error
 }
 
+/**
+ * Elimina el registro de medidas de una fecha. La fecha es única por usuario
+ * (guardarMedidas borra la del mismo día antes de insertar), y borrar por fecha
+ * es robusto aunque el id local (nanoid) no coincida con el remoto (uuid).
+ */
+export async function eliminarMedidasPorFecha(
+  usuarioId: string,
+  fecha: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('medidas_corporales')
+    .delete()
+    .eq('usuario_id', usuarioId)
+    .eq('fecha', fecha)
+  if (error) throw error
+}
+
 /** Carga el historial de medidas corporales de un usuario desde Supabase. */
 export async function cargarMedidas(
   usuarioId: string,

@@ -912,27 +912,98 @@ function ResultadoCard({
 
 // ── HistorialReciente ─────────────────────────────────────────────────────────
 
-function HistorialReciente() {
-  const registros = useFitLogStore(useShallow((s) => s.registrosPeso.slice(0, 5)))
+const RECIENTES = 5
 
-  if (registros.length === 0) return null
+function formatFechaES(iso: string): string {
+  const [y, m, d] = iso.split('-')
+  return `${d}/${m}/${y}`
+}
+
+function HistorialReciente() {
+  const registros = useFitLogStore(useShallow((s) => s.registrosPeso))
+  const [verTodos, setVerTodos] = useState(false)
+
+  // Siempre ordenados: más reciente primero (defensivo, por si llega otro orden)
+  const ordenados = useMemo(
+    () => [...registros].sort((a, b) => b.fecha.localeCompare(a.fecha)),
+    [registros],
+  )
+
+  // Agrupados por mes (solo para la vista completa)
+  const porMes = useMemo(() => {
+    const grupos: { clave: string; titulo: string; items: typeof ordenados }[] = []
+    for (const r of ordenados) {
+      const clave = r.fecha.slice(0, 7)
+      let g = grupos[grupos.length - 1]
+      if (!g || g.clave !== clave) {
+        const [y, m] = clave.split('-')
+        g = { clave, titulo: `${MESES[Number(m) - 1]} ${y}`, items: [] }
+        grupos.push(g)
+      }
+      g.items.push(r)
+    }
+    return grupos
+  }, [ordenados])
+
+  if (ordenados.length === 0) return null
+
+  const Fila = ({ r, anterior }: { r: typeof ordenados[number]; anterior?: typeof ordenados[number] }) => {
+    const diff = anterior ? r.pesoKg - anterior.pesoKg : null
+    return (
+      <li className="flex items-center justify-between bg-zinc-900 rounded-xl px-4 py-3">
+        <span className="text-sm text-zinc-400 tabular-nums">{formatFechaES(r.fecha)}</span>
+        <span className="flex items-baseline gap-2">
+          {diff !== null && Math.abs(diff) >= 0.05 && (
+            <span className={['text-[11px] font-semibold tabular-nums', diff > 0 ? 'text-emerald-400' : 'text-red-400'].join(' ')}>
+              {diff > 0 ? '+' : ''}{diff.toFixed(1)}
+            </span>
+          )}
+          <span className="text-base font-bold text-white tabular-nums">{r.pesoKg} kg</span>
+        </span>
+      </li>
+    )
+  }
 
   return (
     <div className="w-full max-w-xs">
-      <p className="text-xs font-semibold text-zinc-600 uppercase tracking-wider mb-3">
-        Últimos registros
-      </p>
-      <ul className="flex flex-col gap-2">
-        {registros.map((r) => (
-          <li
-            key={r.id}
-            className="flex items-center justify-between bg-zinc-900 rounded-xl px-4 py-3"
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-semibold text-zinc-600 uppercase tracking-wider">
+          {verTodos ? `Todos los registros (${ordenados.length})` : 'Últimos registros'}
+        </p>
+        {ordenados.length > RECIENTES && (
+          <button
+            onClick={() => setVerTodos((v) => !v)}
+            className="flex items-center gap-1 text-xs font-bold text-emerald-400 active:text-emerald-300"
           >
-            <span className="text-sm text-zinc-400">{r.fecha}</span>
-            <span className="text-base font-bold text-white">{r.pesoKg} kg</span>
-          </li>
-        ))}
-      </ul>
+            {verTodos ? <>Ver menos <ChevronUp size={13} /></> : <>Ver todos ({ordenados.length}) <ChevronDown size={13} /></>}
+          </button>
+        )}
+      </div>
+
+      {!verTodos ? (
+        <ul className="flex flex-col gap-2">
+          {ordenados.slice(0, RECIENTES).map((r, i) => (
+            <Fila key={r.id} r={r} anterior={ordenados[i + 1]} />
+          ))}
+        </ul>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {porMes.map((g) => (
+            <div key={g.clave}>
+              <p className="text-[11px] font-bold text-zinc-500 capitalize mb-1.5 px-1">
+                {g.titulo}
+                <span className="text-zinc-700 font-normal ml-1.5">· {g.items.length}</span>
+              </p>
+              <ul className="flex flex-col gap-2">
+                {g.items.map((r) => {
+                  const idx = ordenados.indexOf(r)
+                  return <Fila key={r.id} r={r} anterior={ordenados[idx + 1]} />
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
