@@ -11,6 +11,7 @@ import { pullHistorialInvitado } from '../hooks/useSupabaseSync'
 import { normalizarNombre, matchesEjercicio } from '../utils/normalizar'
 import { sincronizarSesion } from '../services/googleSheets'
 import { enqueueEjercicio, subscribeSyncStatus, type SyncStatus } from '../services/syncQueue'
+import { conectarSesionRealtime, emitirOp, suscribirOpsRemotas, useEstadoRealtime } from '../services/sesionRealtime'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -157,6 +158,30 @@ const DIA_NOMBRE: Record<string, string> = {
 
 // ── SyncDot — indicador de estado de sincronización ──────────────────────────
 
+/** Indicador de sincronización en vivo: quién más está conectado a esta sesión. */
+function LivePill({ estado, otros }: { estado: 'desconectado' | 'conectando' | 'conectado'; otros: string[] }) {
+  const enVivo = estado === 'conectado' && otros.length > 0
+  const texto =
+    estado !== 'conectado' ? (estado === 'conectando' ? 'Conectando…' : 'Sin conexión en vivo')
+    : otros.length === 0 ? 'Solo tú'
+    : otros.length === 1 ? `${otros[0]} en vivo`
+    : `${otros.length} en vivo`
+  return (
+    <span
+      title={texto}
+      className={[
+        'flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-bold shrink-0 max-w-[7.5rem]',
+        enVivo ? 'bg-emerald-500/15 text-emerald-400'
+        : estado === 'conectado' ? 'bg-zinc-800 text-zinc-500'
+        : 'bg-amber-500/10 text-amber-500',
+      ].join(' ')}
+    >
+      <span className={['size-1.5 rounded-full shrink-0', enVivo ? 'bg-emerald-400 animate-pulse' : estado === 'conectado' ? 'bg-zinc-500' : 'bg-amber-500'].join(' ')} />
+      <span className="truncate">{texto}</span>
+    </span>
+  )
+}
+
 function SyncDot({ status }: { status: SyncStatus }) {
   if (status === 'syncing') {
     return (
@@ -233,6 +258,20 @@ export default function SesionPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dia])
 
+  // ── Sincronización en vivo con otros dispositivos ──────────────────────────
+  const saliendoRef = useRef(false)
+  const realtime = useEstadoRealtime()
+  useEffect(() => { conectarSesionRealtime() }, [])
+
+  // Si el otro dispositivo finaliza o cancela la sesión, salimos de esta pantalla
+  useEffect(() => {
+    if (saliendoRef.current || showCompletado) return
+    if (!useFitLogStore.getState().sesionActiva) {
+      navigate(dia === 'parcial' || dia === 'extra' ? '/rutina' : '/', { replace: true })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sesionActiva])
+
   if (!dia) return <ErrorPage mensaje="Día inválido" />
   if (!sesionActiva) return <LoadingPage />
 
@@ -272,17 +311,21 @@ export default function SesionPage() {
       const uid = getIdActivo() ?? ''
       if (uid) enqueueEjercicio(uid, sesionActiva, datos)
     }
+    // Avisar al otro dispositivo con los datos finales del ejercicio
+    emitirOp({ t: 'guardar', i: indice, datos: { ...datos, completado: true } })
     const quedan = sesionActiva.ejercicios.filter((e, i) => i !== indice && !e.completado)
     if (quedan.length === 0) capturarYMostrarResumen()
   }
 
   const handleSaltar = () => {
     saltarEjercicio(indice)
+    emitirOp({ t: 'saltar', i: indice })
     const quedan = sesionActiva.ejercicios.filter((e, i) => i !== indice && !e.completado)
     if (quedan.length === 0) capturarYMostrarResumen()
   }
 
   const handleFinalizar = () => {
+    saliendoRef.current = true
     completarSesion()
     navigate('/', { replace: true })
 
@@ -327,6 +370,7 @@ export default function SesionPage() {
   }
 
   const handleCancelarConfirmado = () => {
+    saliendoRef.current = true
     cancelarSesion()
     navigate('/rutina', { replace: true })
   }
@@ -365,6 +409,7 @@ export default function SesionPage() {
             </div>
           </div>
 
+          <LivePill estado={realtime.estado} otros={realtime.otros.map((o) => o.nombre)} />
           <SyncDot status={syncStatus} />
 
           <button
@@ -526,6 +571,7 @@ function EjercicioCard({
 
   const handleCheckFede = (checked: boolean) => {
     setAyudaFede(checked)
+    emitirOp({ t: 'fede', i: indice, valor: checked })
     if (checked) {
       fedeRef.current?.animate(
         [
@@ -547,9 +593,66 @@ function EjercicioCard({
     return () => { cancelled = true }
   }, [ejercicio.ejercicioId])
 
+  // ── Sincronización en vivo: aplicar ediciones remotas a los inputs locales ──
+  useEffect(() => {
+    return suscribirOpsRemotas((op) => {
+      if (op.t === 'reset') {
+        // Sesión adoptada desde otro dispositivo: reinicializar desde el store
+        const ej = useFitLogStore.getState().sesionActiva?.ejercicios[indice]
+        if (!ej) return
+        setSeries(ej.series.map((s) => ({ ...s })))
+        setPesosRaw(ej.series.map((s) => (s.pesoKg === '' ? '' : String(s.pesoKg))))
+        setNota(ej.notaSesion)
+        setAyudaFede(ej.ayudaFede ?? false)
+        return
+      }
+      if (op.t === 'fusion') {
+        // Reconexión: rellenar solo lo que aquí esté vacío con lo que hay en el store
+        const ej = useFitLogStore.getState().sesionActiva?.ejercicios[indice]
+        if (!ej) return
+        setSeries((prev) => ej.series.map((s, idx) => {
+          const l = prev[idx]
+          if (!l) return { ...s }
+          return {
+            ...l,
+            reps:   l.reps   !== '' ? l.reps   : s.reps,
+            pesoKg: l.pesoKg !== '' ? l.pesoKg : s.pesoKg,
+            etiqueta: l.etiqueta ?? s.etiqueta,
+          }
+        }))
+        setPesosRaw((prev) => ej.series.map((s, idx) => {
+          const raw = prev[idx] ?? ''
+          return raw !== '' ? raw : (s.pesoKg === '' ? '' : String(s.pesoKg))
+        }))
+        setNota((prev) => prev || ej.notaSesion)
+        setAyudaFede((prev) => prev || (ej.ayudaFede ?? false))
+        return
+      }
+      if (!('i' in op) || op.i !== indice) return
+      switch (op.t) {
+        case 'serie':
+          setSeries((prev) => prev.map((s, idx) => idx === op.s ? { ...s, [op.campo]: op.valor } : s))
+          if (op.campo === 'pesoKg') {
+            setPesosRaw((prev) => prev.map((p, idx) => idx === op.s ? (op.valor === '' ? '' : String(op.valor)) : p))
+          }
+          break
+        case 'etiqueta':
+          setSeries((prev) => prev.map((s, idx) => idx === op.s ? { ...s, etiqueta: op.valor ?? undefined } : s))
+          break
+        case 'nota':   setNota(op.valor); break
+        case 'fede':   setAyudaFede(op.valor); break
+        case 'series':
+          setSeries(op.series.map((s) => ({ ...s })))
+          setPesosRaw(op.series.map((s) => (s.pesoKg === '' ? '' : String(s.pesoKg))))
+          break
+      }
+    })
+  }, [indice])
+
   const updateReps = (i: number, raw: string) => {
     const val = raw === '' ? '' : Number(raw)
     setSeries((prev) => prev.map((s, idx) => idx === i ? { ...s, reps: val } : s))
+    emitirOp({ t: 'serie', i: indice, s: i, campo: 'reps', valor: val })
   }
 
   const updatePeso = (i: number, raw: string) => {
@@ -558,8 +661,10 @@ function EjercicioCard({
     const num = parseFloat(normalized)
     if (normalized === '') {
       setSeries((prev) => prev.map((s, idx) => idx === i ? { ...s, pesoKg: '' } : s))
+      emitirOp({ t: 'serie', i: indice, s: i, campo: 'pesoKg', valor: '' })
     } else if (!isNaN(num)) {
       setSeries((prev) => prev.map((s, idx) => idx === i ? { ...s, pesoKg: num } : s))
+      emitirOp({ t: 'serie', i: indice, s: i, campo: 'pesoKg', valor: num })
     }
   }
 
@@ -568,26 +673,35 @@ function EjercicioCard({
     if (!raw) return
     const num = parseFloat(raw.replace(',', '.'))
     if (isNaN(num)) return
+    const nuevasSeries = series.map((s, idx) => idx === 0 ? s : (s.pesoKg === '' ? { ...s, pesoKg: num } : s))
     setPesosRaw((prev) => prev.map((p, idx) => idx === 0 ? p : (p === '' ? raw : p)))
-    setSeries((prev) => prev.map((s, idx) => idx === 0 ? s : (s.pesoKg === '' ? { ...s, pesoKg: num } : s)))
+    setSeries(nuevasSeries)
+    emitirOp({ t: 'series', i: indice, series: nuevasSeries })
   }
 
   const toggleEtiqueta = (i: number, etiqueta: EtiquetaSerie) => {
+    const nueva = series[i]?.etiqueta === etiqueta ? null : etiqueta
     setSeries((prev) =>
       prev.map((s, idx) =>
-        idx === i ? { ...s, etiqueta: s.etiqueta === etiqueta ? undefined : etiqueta } : s,
+        idx === i ? { ...s, etiqueta: nueva ?? undefined } : s,
       ),
     )
+    emitirOp({ t: 'etiqueta', i: indice, s: i, valor: nueva })
   }
 
   const addSerie = () => {
-    setSeries((prev) => [...prev, { numero: prev.length + 1, reps: '', pesoKg: '' }])
+    const nuevasSeries = [...series, { numero: series.length + 1, reps: '' as const, pesoKg: '' as const }]
+    setSeries(nuevasSeries)
     setPesosRaw((prev) => [...prev, ''])
+    emitirOp({ t: 'series', i: indice, series: nuevasSeries })
   }
 
   const removeSerie = () => {
-    setSeries((prev) => prev.length > 1 ? prev.slice(0, -1) : prev)
-    setPesosRaw((prev) => prev.length > 1 ? prev.slice(0, -1) : prev)
+    if (series.length <= 1) return
+    const nuevasSeries = series.slice(0, -1)
+    setSeries(nuevasSeries)
+    setPesosRaw((prev) => prev.slice(0, -1))
+    emitirOp({ t: 'series', i: indice, series: nuevasSeries })
   }
 
   const buildFinalSeries = (): Serie[] =>
@@ -801,7 +915,7 @@ function EjercicioCard({
         </label>
         <textarea
           value={nota}
-          onChange={(e) => setNota(e.target.value)}
+          onChange={(e) => { setNota(e.target.value); emitirOp({ t: 'nota', i: indice, valor: e.target.value }) }}
           placeholder="Cómo fue el ejercicio, sensaciones, marca personal…"
           rows={3}
           className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-sm text-white

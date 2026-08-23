@@ -5,6 +5,7 @@ import { useSupabaseSync, useSyncCountdown, usePullStatus } from '../../hooks/us
 import { getUsuarioActivo, getPerfilVisto, clearPerfilVisto, cargarDatosUsuario } from '../../services/supabase'
 import { useFitLogStore } from '../../store/useFitLogStore'
 import { RefreshCw } from 'lucide-react'
+import { conectarSesionRealtime } from '../../services/sesionRealtime'
 
 export default function Layout() {
   useSupabaseSync()
@@ -18,9 +19,12 @@ export default function Layout() {
   const [perfilVisto,     setPerfilVisto_]     = useState(getPerfilVisto)
   const [volviendo,       setVolviendo]        = useState(false)
 
+  // Canal de sesión en vivo (se reconecta si cambia el perfil visto)
+  useEffect(() => { conectarSesionRealtime() }, [perfilVisto])
+
   // Sincronizar el estado del banner cuando cambia perfilVisto en localStorage
   useEffect(() => {
-    const onStorage = () => setPerfilVisto_(getPerfilVisto())
+    const onStorage = () => { setPerfilVisto_(getPerfilVisto()); conectarSesionRealtime() }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])

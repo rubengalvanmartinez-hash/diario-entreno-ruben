@@ -92,6 +92,11 @@ export interface FitLogActions {
   agregarEjercicioASesion: (ejercicioId: string) => void
   /** Quita el ejercicio en la posición dada de la sesión activa (temporal) */
   quitarEjercicioDeSesion: (indice: number) => void
+  /**
+   * Sustituye la sesión activa completa (sincronización en vivo entre dispositivos).
+   * Mantiene el índice actual si sigue siendo válido; si no, va al primer ejercicio incompleto.
+   */
+  reemplazarSesionActiva: (sesion: Sesion | null) => void
 
   // ── Series dentro de un ejercicio activo ───────────────────────────────
   actualizarSerie: (ejercicioIndice: number, serieIndex: number, cambio: Partial<Serie>) => void
@@ -440,6 +445,21 @@ export const useFitLogStore = create<FitLogStore>()(
           return {
             sesionActiva: { ...s.sesionActiva, ejercicios },
             indiceEjercicioActual: nuevoIndice,
+          }
+        })
+      },
+
+      reemplazarSesionActiva(sesion) {
+        set((s) => {
+          if (!sesion) return { sesionActiva: null, indiceEjercicioActual: 0 }
+          const mismaSesion = s.sesionActiva?.id === sesion.id
+          const indiceValido = mismaSesion && s.indiceEjercicioActual < sesion.ejercicios.length
+          const primeroIncompleto = sesion.ejercicios.findIndex((e) => !e.completado)
+          return {
+            sesionActiva: sesion,
+            indiceEjercicioActual: indiceValido
+              ? s.indiceEjercicioActual
+              : Math.max(0, primeroIncompleto),
           }
         })
       },

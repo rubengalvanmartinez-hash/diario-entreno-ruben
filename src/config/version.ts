@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.3.0'
+export const APP_VERSION = '2.4.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,22 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.4.0',
+    fecha: '23/08/2026',
+    tipo: 'mayor',
+    cambios: [
+      'SESIÓN EN VIVO entre dispositivos (móvil de Rubén + móvil del entrenador) con Supabase Realtime Broadcast por websocket: ~50-60 ms de extremo a extremo, sin pasar por la base de datos',
+      'Cada reps, peso, etiqueta RIR/Fallo, nota, "Fede ayudó", añadir/quitar serie, Guardar y Saltar se envía al instante como operación individual y se aplica campo a campo: uno puede poner las reps y el otro el peso de la misma serie sin pisarse',
+      'Indicador en la cabecera de la sesión: "<nombre> en vivo" cuando el otro móvil está conectado (presencia), "Solo tú" si no, ámbar si no hay conexión en vivo',
+      'El móvil que entra tarde adopta la sesión en curso (aparece "Sesión en curso" en Inicio); al Finalizar o Cancelar en uno, el otro sale también',
+      'Si los dos móviles arrancan el mismo día por separado, las dos sesiones se fusionan y convergen a una sola',
+      'Reconexión (pantalla bloqueada, sin cobertura): al volver se intercambia el estado y se fusiona campo a campo — un campo vacío toma el valor del otro móvil, un campo escrito se conserva; también al volver la app a primer plano',
+      'Requisito: ambos móviles sobre el mismo perfil (entrar como Rubén, o como admin viendo el perfil de Rubén) y con la app actualizada',
+      'Solo el móvil que pulsa "Guardar y siguiente" sube el ejercicio a entrenos (sin duplicados)',
+      'Tests: test-realtime.mjs (latencia broadcast entre dos clientes) y prueba manual con dos pestañas: ops bidireccionales, guardar/saltar, cancelar, entrada tardía, reconexión y convergencia de sesiones',
+    ],
+  },
   {
     version: '2.3.0',
     fecha: '23/08/2026',
