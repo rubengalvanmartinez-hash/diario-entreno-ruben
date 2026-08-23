@@ -1,7 +1,8 @@
-// Test temporal de lógica pura (no se commitea) — bundle con rolldown y ejecutar con node
+// Tests de lógica pura — bundle con rolldown y ejecutar con node (ver memoria / changelog 2.2.7)
 import { normalizarNombre, nombreCanonico, matchesEjercicio } from './src/utils/normalizar'
 import { serieConDatos } from './src/types/models'
 import { DEFAULT_EJERCICIOS, esConfigPorDefecto } from './src/store/defaultData'
+import { grupoDeEjercicio } from './src/utils/gruposMusculares'
 
 let fallos = 0
 function check(desc: string, cond: boolean) {
@@ -64,6 +65,28 @@ for (const sesion of ordenado) {
   if (e && e.series.some(serieConDatos)) encontrados.push(sesion.fecha)
 }
 check('último entreno salta la sesión vacía del 12/08 y elige la del 01/08', encontrados[0] === '2026-08-01')
+
+
+// ── grupoDeEjercicio (nombres reales del historial de Rubén) ─────────────────
+const esperado: Record<string, string> = {
+  'Jalón al pecho': 'espalda', 'Peso muerto': 'espalda', 'Peso muerto libre': 'espalda', 'Remo': 'espalda', 'Dominadas': 'espalda',
+  'Bíceps': 'brazos', 'Biceps': 'brazos', 'Bíceps con barra fija': 'brazos', 'Biceps martillo': 'brazos', 'Biceps martillo mancuernas': 'brazos',
+  'Polea Bíceps': 'brazos', 'Curo de bíceps con mancuerna en banca': 'brazos', 'Triceps francés': 'brazos', 'Triceps con soga': 'brazos',
+  'Triceps tras nuca a 1 brazo': 'brazos',
+  'Press de pecho': 'pecho', 'Pecho inclinado': 'pecho', 'Pecho inclinado mancuernas': 'pecho', 'Pecho inclinado Máquina': 'pecho',
+  'Cruces en polea': 'pecho', 'Mariposa': 'pecho', 'Aperturas': 'pecho', 'Pull over polea alta': 'pecho',
+  'Press militar': 'hombro', 'Vuelos laterales': 'hombro', 'Vuelo lateral polea a 1 brazo': 'hombro', 'Vuelo frontal en polea': 'hombro',
+  'Posteriores mariposa': 'hombro',
+  'Extensión de cuádriceps': 'piernas', 'Extensión de pierna': 'piernas', 'Cuadriceps sillón': 'piernas', 'Prensa 45': 'piernas',
+  'Prensa 45º': 'piernas', 'Press de pierna': 'piernas', 'Presa de pierna': 'piernas', 'Jaca': 'piernas', 'Sentadilla Hack': 'piernas',
+  'Curl femoral acostado': 'piernas', 'Abductores': 'piernas', 'Aductores': 'piernas', 'HipTrust': 'piernas', 'Hip thrust': 'piernas',
+  'Hiptrust': 'piernas', 'Subida al cajón / sentadilla': 'piernas',
+  'Abdominales': 'abdomen', 'Abdominales ': 'abdomen', 'Oblicuos': 'abdomen', 'Oblicuos polea': 'abdomen', 'Oblicuos en polea': 'abdomen',
+  'Hiperextensiones': 'espalda', 'Elevación de piernas': 'abdomen', 'Ejercicio raro XYZ': 'otros',
+}
+for (const [nombre, grupo] of Object.entries(esperado)) {
+  check(`grupo '${nombre}' → ${grupo} (obtenido: ${grupoDeEjercicio(nombre)})`, grupoDeEjercicio(nombre) === grupo)
+}
 
 console.log(fallos === 0 ? '\nTODOS LOS TESTS PASAN' : `\n${fallos} TESTS FALLAN`)
 process.exit(fallos === 0 ? 0 : 1)

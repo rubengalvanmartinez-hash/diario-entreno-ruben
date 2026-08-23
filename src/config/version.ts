@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.4.0'
+export const APP_VERSION = '2.4.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.4.1',
+    fecha: '23/08/2026',
+    tipo: 'media',
+    cambios: [
+      'Tendencias → Por ejercicio: el desplegable se sustituye por BOTONES DE GRUPO MUSCULAR con pictograma y nombre (Pecho, Hombro, Brazos, Espalda, Piernas, Abdomen) y contador de ejercicios',
+      'Al tocar un grupo se listan sus ejercicios (orden alfabético, con el día) y se muestra directamente la tendencia del primero; tocar otro cambia el panel',
+      'Clasificación automática por palabras clave del nombre (utils/gruposMusculares.ts), solo para la vista — no modifica datos; si un nombre no encaja aparece un grupo "Otros"',
+      'Verificado con los 27 ejercicios reales de la configuración de Rubén y los 50 nombres del historial: todos clasificados (Jalón al pecho → espalda, Curl femoral → piernas, Pull over → pecho, Posteriores mariposa → hombro, Curo de bíceps … en banca → brazos)',
+      'Tests de clasificación añadidos a test-logic.mts (52 casos)',
+    ],
+  },
   {
     version: '2.4.0',
     fecha: '23/08/2026',

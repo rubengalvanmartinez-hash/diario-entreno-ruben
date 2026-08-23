@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown, ChevronRight, ChevronDown, ChevronUp, ArrowLeft, AlertTriangle, X } from 'lucide-react'
+import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown, ChevronRight, ArrowLeft, AlertTriangle, X } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { getUsuarioActivo, getIdActivo, actualizarSerieSupabase } from '../services/supabase'
@@ -8,6 +8,7 @@ import { setEdicionEnCurso } from '../hooks/useSupabaseSync'
 import { generarInformePDF } from '../services/pdfReport'
 import type { Ejercicio, EtiquetaSerie, Sesion } from '../types/models'
 import { nombreCanonico, matchesEjercicio } from '../utils/normalizar'
+import { GRUPOS_VISTA, GRUPO_OTROS, grupoDeEjercicio, type GrupoId } from '../utils/gruposMusculares'
 
 const MESES_ES_CORTO = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -544,7 +545,7 @@ export default function TendenciasPage() {
       </div>
 
       {/* Selector */}
-      <SelectorEjercicio
+      <SelectorGrupoMuscular
         ejercicios={sorted}
         seleccionado={ejercicioId}
         onSeleccionar={setEjercicioId}
@@ -1061,117 +1062,175 @@ function PanelHistoricoSeries({
   )
 }
 
-// ── SelectorEjercicio ─────────────────────────────────────────────────────────
+// ── SelectorGrupoMuscular ─────────────────────────────────────────────────────
+// Botones por grupo muscular (icono + nombre) → lista de ejercicios del grupo.
 
-function SelectorEjercicio({
+/** Pictogramas sencillos de cada grupo (trazo con currentColor). */
+const ICONO_GRUPO: Record<GrupoId, React.ReactNode> = {
+  pecho: (
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 8 L36 8 L40 20 L36 40 L12 40 L8 20 Z" />
+      <path d="M10 20 C14 17 20 18 23 23 C23 28 17 31 11 28" />
+      <path d="M38 20 C34 17 28 18 25 23 C25 28 31 31 37 28" />
+      <line x1="24" y1="23" x2="24" y2="40" strokeOpacity="0.5" />
+    </svg>
+  ),
+  hombro: (
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 22 C8 12 16 8 24 8 C32 8 40 12 42 22" />
+      <path d="M6 22 C6 30 10 36 14 40" />
+      <path d="M24 8 L24 40" strokeOpacity="0.5" />
+      <path d="M6 22 C10 26 18 26 21 20 C18 14 10 14 6 22 Z" fill="currentColor" fillOpacity="0.25" />
+      <path d="M42 22 C42 30 38 36 34 40" />
+    </svg>
+  ),
+  brazos: (
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 30 L14 14 C16 10 22 10 24 14 L28 22" />
+      <path d="M28 22 C34 18 42 20 42 28 C42 36 34 40 26 38 L14 34 L6 30" />
+      <path d="M16 18 C18 14 26 14 27 20 C27 26 18 28 15 24" fill="currentColor" fillOpacity="0.25" />
+    </svg>
+  ),
+  espalda: (
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 8 L38 8 L42 18 L30 40 L18 40 L6 18 Z" />
+      <line x1="24" y1="8" x2="24" y2="40" strokeOpacity="0.5" />
+      <path d="M12 14 C16 20 20 22 24 22 C28 22 32 20 36 14" />
+      <path d="M14 26 C18 30 30 30 34 26" strokeOpacity="0.6" />
+    </svg>
+  ),
+  piernas: (
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 6 L22 6 L22 22 L18 42 L12 42 L10 22 Z" />
+      <path d="M26 6 L36 6 L38 22 L36 42 L30 42 L26 22 Z" />
+      <path d="M13 16 C15 14 19 14 21 16" strokeOpacity="0.6" />
+      <path d="M27 16 C29 14 33 14 35 16" strokeOpacity="0.6" />
+    </svg>
+  ),
+  abdomen: (
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 6 L34 6 L36 24 L32 42 L16 42 L12 24 Z" />
+      <line x1="24" y1="10" x2="24" y2="40" strokeOpacity="0.6" />
+      <path d="M15 16 L33 16 M14 25 L34 25 M16 34 L32 34" strokeOpacity="0.6" />
+    </svg>
+  ),
+  otros: (
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="24" cy="24" r="16" />
+      <path d="M24 16 L24 26 M24 32 L24 32.5" />
+    </svg>
+  ),
+}
+
+function SelectorGrupoMuscular({
   ejercicios, seleccionado, onSeleccionar,
 }: {
   ejercicios: Ejercicio[]
   seleccionado: string | null
   onSeleccionar: (id: string) => void
 }) {
-  const [abierto, setAbierto] = useState(false)
-  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null)
-  const btnRef  = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  const seleccionadoObj = ejercicios.find((e) => e.id === seleccionado) ?? null
-
-  const handleToggle = () => {
-    if (!abierto && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect()
-      // Limitar la altura máxima al 60% de la pantalla desde el borde inferior del botón
-      setMenuRect({ top: r.bottom + 6, left: r.left, width: r.width })
+  // Ejercicios por grupo, ordenados alfabéticamente
+  const porGrupo = useMemo(() => {
+    const m = new Map<GrupoId, Ejercicio[]>()
+    for (const e of ejercicios) {
+      const g = grupoDeEjercicio(e.nombre)
+      if (!m.has(g)) m.set(g, [])
+      m.get(g)!.push(e)
     }
-    setAbierto((v) => !v)
+    for (const lista of m.values()) lista.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+    return m
+  }, [ejercicios])
+
+  const gruposVisibles = useMemo(
+    () => [...GRUPOS_VISTA, GRUPO_OTROS].filter((g) => (porGrupo.get(g.id)?.length ?? 0) > 0),
+    [porGrupo],
+  )
+
+  const grupoDelSeleccionado = useMemo(() => {
+    const e = ejercicios.find((x) => x.id === seleccionado)
+    return e ? grupoDeEjercicio(e.nombre) : null
+  }, [ejercicios, seleccionado])
+
+  const [grupo, setGrupo] = useState<GrupoId | null>(grupoDelSeleccionado)
+
+  // Si la selección cambia desde fuera (p. ej. al cargar), seguir a su grupo
+  useEffect(() => {
+    if (grupoDelSeleccionado && grupoDelSeleccionado !== grupo) setGrupo(grupoDelSeleccionado)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grupoDelSeleccionado])
+
+  const elegirGrupo = (id: GrupoId) => {
+    setGrupo(id)
+    const lista = porGrupo.get(id) ?? []
+    // Al cambiar de grupo, mostrar directamente la tendencia de su primer ejercicio
+    if (lista.length > 0 && !lista.some((e) => e.id === seleccionado)) onSeleccionar(lista[0].id)
   }
 
-  // Cerrar SOLO al tocar fuera TANTO del botón COMO del menú
-  useEffect(() => {
-    if (!abierto) return
-    const handler = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as Node
-      const dentroBtn  = btnRef.current?.contains(target)  ?? false
-      const dentroMenu = menuRef.current?.contains(target) ?? false
-      if (!dentroBtn && !dentroMenu) setAbierto(false)
-    }
-    // mousedown para escritorio, touchstart para móvil
-    document.addEventListener('mousedown', handler)
-    document.addEventListener('touchstart', handler, { passive: true })
-    return () => {
-      document.removeEventListener('mousedown', handler)
-      document.removeEventListener('touchstart', handler)
-    }
-  }, [abierto])
-
-  // Agrupar por día (solo grupos con ejercicios)
-  const grupos = ([
-    { label: 'Día 1', items: ejercicios.filter((e) => e.dia === 1) },
-    { label: 'Día 2', items: ejercicios.filter((e) => e.dia === 2) },
-    { label: 'Día 3', items: ejercicios.filter((e) => e.dia === 3) },
-    { label: 'Otros',  items: ejercicios.filter((e) => e.dia !== 1 && e.dia !== 2 && e.dia !== 3) },
-  ] as const).filter((g) => g.items.length > 0)
-
-  // Altura máxima del menú: desde el borde inferior del botón hasta el 90% de la pantalla
-  const maxMenuH = menuRect
-    ? Math.min(288, window.innerHeight * 0.9 - menuRect.top)
-    : 288
+  const listaGrupo = grupo ? (porGrupo.get(grupo) ?? []) : []
 
   return (
-    <div className="px-4 pb-3">
-      {/* Botón selector */}
-      <button
-        ref={btnRef}
-        onClick={handleToggle}
-        className="w-full flex items-center gap-3 bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-3.5 text-left active:bg-zinc-800 transition-colors"
-      >
-        <span className="flex-1 text-sm font-semibold text-white truncate">
-          {seleccionadoObj ? seleccionadoObj.nombre : 'Seleccionar ejercicio…'}
-        </span>
-        {abierto
-          ? <ChevronUp size={16} className="text-zinc-400 shrink-0" />
-          : <ChevronDown size={16} className="text-zinc-400 shrink-0" />
-        }
-      </button>
+    <div className="px-4 pb-3 flex flex-col gap-3">
+      {/* Botones de grupo muscular */}
+      <div className="grid grid-cols-3 gap-2">
+        {gruposVisibles.map((g) => {
+          const activo = g.id === grupo
+          const n = porGrupo.get(g.id)?.length ?? 0
+          return (
+            <button
+              key={g.id}
+              onClick={() => elegirGrupo(g.id)}
+              aria-pressed={activo}
+              className={[
+                'relative flex flex-col items-center gap-1.5 rounded-2xl border px-2 pt-3 pb-2.5 transition-colors',
+                activo
+                  ? 'bg-blue-600/15 border-blue-500 text-blue-300'
+                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 active:bg-zinc-800',
+              ].join(' ')}
+            >
+              <span className={['size-10', activo ? 'text-blue-400' : 'text-zinc-500'].join(' ')}>
+                {ICONO_GRUPO[g.id]}
+              </span>
+              <span className={['text-xs font-bold', activo ? 'text-white' : 'text-zinc-300'].join(' ')}>
+                {g.nombre}
+              </span>
+              <span className={[
+                'absolute top-1.5 right-2 text-[10px] font-bold tabular-nums rounded-full px-1.5 py-0.5',
+                activo ? 'bg-blue-500/20 text-blue-300' : 'bg-zinc-800 text-zinc-500',
+              ].join(' ')}>
+                {n}
+              </span>
+            </button>
+          )
+        })}
+      </div>
 
-      {/* Menú — position:fixed para escapar de overflow:hidden padres */}
-      {abierto && menuRect && (
-        <div
-          ref={menuRef}
-          style={{ position: 'fixed', top: menuRect.top, left: menuRect.left, width: menuRect.width, zIndex: 9999 }}
-          className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
-        >
-          <div
-            style={{
-              maxHeight: maxMenuH,
-              overflowY: 'auto',
-              overscrollBehavior: 'contain',
-              WebkitOverflowScrolling: 'touch',
-            } as React.CSSProperties}
-          >
-            {grupos.map((grupo) => (
-              <div key={grupo.label}>
-                <div className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 bg-zinc-950/70 sticky top-0">
-                  {grupo.label}
-                </div>
-                {grupo.items.map((ej) => (
-                  <button
-                    key={ej.id}
-                    onClick={() => { onSeleccionar(ej.id); setAbierto(false) }}
-                    className={[
-                      'w-full text-left px-4 py-3.5 text-sm font-medium border-b border-zinc-800/50 last:border-0 transition-colors',
-                      ej.id === seleccionado
-                        ? 'text-blue-400 bg-blue-500/10'
-                        : 'text-white active:bg-zinc-800',
-                    ].join(' ')}
-                  >
-                    {ej.nombre}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
+      {/* Ejercicios del grupo elegido */}
+      {grupo ? (
+        <div className="flex flex-wrap gap-2">
+          {listaGrupo.map((e) => {
+            const activo = e.id === seleccionado
+            return (
+              <button
+                key={e.id}
+                onClick={() => onSeleccionar(e.id)}
+                aria-pressed={activo}
+                className={[
+                  'flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors',
+                  activo
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-zinc-900 border-zinc-800 text-zinc-300 active:bg-zinc-800',
+                ].join(' ')}
+              >
+                {e.nombre}
+                <span className={['text-[10px] font-bold', activo ? 'text-blue-200' : 'text-zinc-600'].join(' ')}>
+                  D{e.dia}
+                </span>
+              </button>
+            )
+          })}
         </div>
+      ) : (
+        <p className="text-xs text-zinc-600 px-1">Elige un grupo muscular para ver sus ejercicios.</p>
       )}
     </div>
   )
