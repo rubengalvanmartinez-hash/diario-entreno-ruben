@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, Plus, Trash2, X, Check, Users, Shield, Scale } from 'lucide-react'
+import { ChevronLeft, Plus, Trash2, X, Check, Users, Shield, Scale, KeyRound } from 'lucide-react'
 import {
   obtenerUsuarios,
   crearUsuario,
   actualizarUsuario,
   eliminarUsuario,
+  restablecerPassword,
   getUsuarioActivo,
   crearEjerciciosDesdeTemplate,
   type UsuarioSupabase,
@@ -58,6 +59,11 @@ export default function AdminUsuariosPage() {
   // Toggles en proceso
   const [toggling, setToggling] = useState<string | null>(null)
 
+  // Restablecer contraseña (confirmación en dos toques)
+  const [reseteandoId, setReseteandoId] = useState<string | null>(null)
+  const [reseteando,   setReseteando]   = useState(false)
+  const [mensaje,      setMensaje]      = useState('')
+
   useEffect(() => { cargarUsuarios() }, [])
 
   async function cargarUsuarios() {
@@ -99,6 +105,21 @@ export default function AdminUsuariosPage() {
       setError('No se pudo actualizar el usuario.')
     } finally {
       setToggling(null)
+    }
+  }
+
+  const handleRestablecer = async (u: UsuarioSupabase) => {
+    if (reseteandoId !== u.id) { setReseteandoId(u.id); return }
+    setReseteando(true)
+    try {
+      await restablecerPassword(u.id)
+      setReseteandoId(null)
+      setMensaje(`Contraseña de ${u.nombre} restablecida: en su próximo acceso creará una nueva.`)
+      await cargarUsuarios()
+    } catch {
+      setError('No se pudo restablecer la contraseña.')
+    } finally {
+      setReseteando(false)
     }
   }
 
@@ -144,6 +165,13 @@ export default function AdminUsuariosPage() {
         {error && (
           <div className="bg-red-900/20 border border-red-800/40 rounded-2xl px-5 py-4 text-red-400 text-sm mb-4">{error}</div>
         )}
+        {mensaje && (
+          <div className="bg-emerald-900/20 border border-emerald-800/40 rounded-2xl px-5 py-3 text-emerald-400 text-sm mb-4 flex items-start gap-2">
+            <Check size={16} className="shrink-0 mt-0.5" />
+            <span className="flex-1">{mensaje}</span>
+            <button onClick={() => setMensaje('')} className="text-emerald-600 active:text-emerald-300" aria-label="Cerrar aviso"><X size={14} /></button>
+          </div>
+        )}
         {!cargando && !error && usuarios.length === 0 && (
           <div className="flex flex-col items-center gap-4 py-20 text-center">
             <div className="size-16 rounded-full bg-zinc-900 flex items-center justify-center">
@@ -172,9 +200,9 @@ export default function AdminUsuariosPage() {
                         <span className="text-[10px] font-bold bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded-full">Peso</span>
                       )}
                     </div>
-                    {!u.es_admin && (
-                      <p className="text-xs text-zinc-600 mt-0.5">Sin contraseña definida aún</p>
-                    )}
+                    <p className={['text-xs mt-0.5', u.tiene_password ? 'text-zinc-600' : 'text-amber-500'].join(' ')}>
+                      {u.tiene_password ? 'Contraseña establecida' : 'Sin contraseña: la creará en su próximo acceso'}
+                    </p>
                   </div>
                   <button
                     onClick={() => handleEliminar(u.id)}
@@ -202,6 +230,40 @@ export default function AdminUsuariosPage() {
                     onToggle={() => handleToggle(u, 'puede_peso_corporal')}
                   />
                 </div>
+
+                {/* Restablecer contraseña */}
+                {u.tiene_password && (
+                  <div className="border-t border-zinc-800 pt-3 flex items-center justify-between gap-3">
+                    <p className="text-xs text-zinc-500 leading-snug">
+                      {reseteandoId === u.id
+                        ? `¿Seguro? ${u.nombre} tendrá que crear una contraseña nueva al entrar.`
+                        : '¿Ha olvidado la contraseña? Restablécela aquí.'}
+                    </p>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {reseteandoId === u.id && (
+                        <button
+                          onClick={() => setReseteandoId(null)}
+                          className="text-xs font-bold text-zinc-400 px-2 py-2 active:text-white"
+                        >
+                          No
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleRestablecer(u)}
+                        disabled={reseteando}
+                        className={[
+                          'flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-colors disabled:opacity-50',
+                          reseteandoId === u.id
+                            ? 'bg-amber-600 text-white active:bg-amber-700'
+                            : 'bg-zinc-800 text-zinc-300 active:bg-zinc-700',
+                        ].join(' ')}
+                      >
+                        <KeyRound size={13} />
+                        {reseteando && reseteandoId === u.id ? '…' : reseteandoId === u.id ? 'Sí, restablecer' : 'Restablecer'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

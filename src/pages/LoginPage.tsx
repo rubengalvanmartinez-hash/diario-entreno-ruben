@@ -126,6 +126,7 @@ export default function LoginPage() {
   const [password,     setPassword]     = useState('')
   const [showPass,     setShowPass]     = useState(false)
   const [errorLogin,   setErrorLogin]   = useState('')
+  const [ayudaPass,    setAyudaPass]    = useState(false)
   const [entrando,     setEntrando]     = useState(false)
 
   // Primer acceso
@@ -438,12 +439,39 @@ export default function LoginPage() {
 
         {/* Hint primer acceso */}
         {usuarioSeleccionado && (
-          <p className="text-xs text-zinc-600 -mt-1 px-1">
-            ¿Primera vez? Introduce cualquier texto y se te pedirá crear tu contraseña.
-          </p>
+          usuarioSeleccionado.tiene_password === false ? (
+            <p className="text-xs text-amber-400 -mt-1 px-1">
+              Esta cuenta no tiene contraseña (primer acceso o restablecida): escribe cualquier texto y la crearás ahora.
+            </p>
+          ) : (
+            <p className="text-xs text-zinc-600 -mt-1 px-1">
+              ¿Primera vez? Introduce cualquier texto y se te pedirá crear tu contraseña.
+            </p>
+          )
         )}
 
         {errorLogin && <p className="text-sm text-red-400 -mt-1">{errorLogin}</p>}
+
+        {/* Olvidé la contraseña */}
+        {usuarioSeleccionado && (
+          <div className="-mt-1">
+            <button
+              type="button"
+              onClick={() => setAyudaPass((v) => !v)}
+              className="text-xs text-zinc-500 underline underline-offset-2 active:text-zinc-300 px-1"
+            >
+              ¿Has olvidado la contraseña?
+            </button>
+            {ayudaPass && (
+              <div className="mt-2 bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 text-xs text-zinc-400 leading-relaxed">
+                La app no guarda tu contraseña ni envía correos, así que no se puede recuperar.
+                Pide a un <span className="text-white font-semibold">administrador</span> que la restablezca
+                desde <span className="text-white font-semibold">Ajustes → Gestión de usuarios → Restablecer</span>.
+                En tu siguiente acceso crearás una contraseña nueva.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Botón entrar */}
         <button

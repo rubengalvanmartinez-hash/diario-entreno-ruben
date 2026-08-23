@@ -76,6 +76,8 @@ export interface UsuarioSupabase {
   es_admin: boolean
   puede_peso_corporal?: boolean
   created_at?: string
+  /** true si el usuario ya tiene contraseña establecida (derivado de password_hash, nunca se expone el hash) */
+  tiene_password?: boolean
 }
 
 // ── Perfil visto por admin ──────────────────────────────────────────────────
@@ -183,10 +185,27 @@ export async function hashPassword(password: string): Promise<string> {
 export async function obtenerUsuarios(): Promise<UsuarioSupabase[]> {
   const { data, error } = await supabase
     .from('usuarios')
-    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, puede_peso_corporal, created_at')
+    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, puede_peso_corporal, created_at, password_hash')
     .order('created_at', { ascending: true })
   if (error) throw error
-  return (data ?? []) as UsuarioSupabase[]
+  // Exponer solo si tiene contraseña, nunca el hash
+  return (data ?? []).map(({ password_hash, ...u }) => ({
+    ...(u as UsuarioSupabase),
+    tiene_password: !!password_hash,
+  }))
+}
+
+/**
+ * Restablece la contraseña de un usuario: deja password_hash a NULL, de modo
+ * que en su siguiente acceso la app le pide crear una contraseña nueva
+ * (flujo de "primer acceso"). La app no guarda contraseñas ni envía emails.
+ */
+export async function restablecerPassword(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('usuarios')
+    .update({ password_hash: null })
+    .eq('id', userId)
+  if (error) throw error
 }
 
 export async function verificarPassword(userId: string, password: string): Promise<boolean> {

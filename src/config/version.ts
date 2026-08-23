@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.2.9'
+export const APP_VERSION = '2.3.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.3.0',
+    fecha: '23/08/2026',
+    tipo: 'media',
+    cambios: [
+      'Restablecer contraseña: la app no guarda contraseñas (solo hash SHA-256) ni envía correos, así que no se pueden "recordar"; la vía es restablecerla y que el usuario cree una nueva',
+      'Gestión de usuarios (admin): botón "Restablecer" por usuario con confirmación en dos toques — deja la cuenta sin contraseña y en su siguiente acceso la app le pide crear una nueva',
+      'Gestión de usuarios: estado real de contraseña ("Contraseña establecida" / "Sin contraseña: la creará en su próximo acceso") en lugar del texto fijo anterior',
+      'Login: enlace "¿Has olvidado la contraseña?" que explica cómo pedir el restablecimiento a un administrador',
+      'Login: si la cuenta seleccionada no tiene contraseña, aviso ámbar indicando que se creará al entrar',
+      'Servicio: restablecerPassword() y obtenerUsuarios() devuelve tiene_password (nunca el hash)',
+    ],
+  },
   {
     version: '2.2.9',
     fecha: '23/08/2026',
