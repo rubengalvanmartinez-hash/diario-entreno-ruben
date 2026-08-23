@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.4.1'
+export const APP_VERSION = '2.4.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.4.2',
+    fecha: '23/08/2026',
+    tipo: 'media',
+    cambios: [
+      'BUG: en Tendencias casi todos los ejercicios decían "Sin suficientes datos" cuando un admin (prueba1) estaba viendo el perfil de Rubén',
+      'Causa: el pull automático cada 5 s (useSupabaseSync) usaba el USUARIO LOGUEADO en vez del perfil visto — traía las sesiones de prueba de prueba1 (93 filas de junio) y reemplazaba las 206 de Rubén cargadas al entrar; afectaba también al último entreno en sesión y a los pesos',
+      'Fix: el pull y el refresco manual usan getIdActivo() (perfil visto → Rubén → usuario)',
+      'Verificado con datos reales: viendo el perfil de Rubén como admin, tras varios pulls el historial sigue en 206 sesiones y 26 de 30 ejercicios muestran tendencia',
+      'Los 4 que siguen sin datos (Curo de bíceps con mancuerna en banca, Posteriores mariposa, Curl bayesian, Tríceps de soga vertical) tienen menos de 2 sesiones con números reales: casi siempre se saltaron (filas vacías del sync antiguo) o son nuevos',
+    ],
+  },
   {
     version: '2.4.1',
     fecha: '23/08/2026',

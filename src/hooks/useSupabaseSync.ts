@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { cargarDatosUsuario, getUsuarioActivo, RUBEN_UUID, respaldarConfigEjerciciosSiFalta } from '../services/supabase'
+import { cargarDatosUsuario, getUsuarioActivo, getIdActivo, RUBEN_UUID, respaldarConfigEjerciciosSiFalta } from '../services/supabase'
 import { useFitLogStore } from '../store/useFitLogStore'
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,8 @@ export async function refreshFromSupabase(): Promise<void> {
   _inFlight = true
   setIsSyncing(true)
   try {
-    const idSupabase = usuario.esRuben ? RUBEN_UUID : usuario.id
+    // Perfil activo: si un admin está viendo el perfil de otro usuario, se sincroniza ESE usuario
+    const idSupabase = getIdActivo() ?? (usuario.esRuben ? RUBEN_UUID : usuario.id)
     const { sesiones, registrosPeso } = await cargarDatosUsuario(idSupabase)
     useFitLogStore.getState().importarHistorial(sesiones, registrosPeso)
   } catch {
@@ -92,7 +93,9 @@ export async function pullHistorialInvitado(): Promise<void> {
 
   _pullInFlight = true
   try {
-    const idSupabase = usuario.esRuben ? RUBEN_UUID : usuario.id
+    // Perfil activo (perfil visto → Rubén → usuario): antes usaba el usuario logueado y, al ver
+    // el perfil de Rubén como admin, el pull reemplazaba su historial por el del admin
+    const idSupabase = getIdActivo() ?? (usuario.esRuben ? RUBEN_UUID : usuario.id)
     const { sesiones, registrosPeso } = await cargarDatosUsuario(idSupabase)
     console.log(`[Sync] Pull OK: remoto=${sesiones.length} pesos=${registrosPeso.length}`)
     if (sesiones.length > 0) {
