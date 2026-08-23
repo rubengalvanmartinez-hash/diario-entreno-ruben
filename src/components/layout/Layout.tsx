@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import BottomNav from './BottomNav'
 import { useSupabaseSync, useSyncCountdown, usePullStatus } from '../../hooks/useSupabaseSync'
-import { getUsuarioActivo, getPerfilVisto, clearPerfilVisto, cargarDatosUsuario } from '../../services/supabase'
+import { getUsuarioActivo, getPerfilVisto, clearPerfilVisto, cargarDatosUsuario, cargarEquivalenciasEnStore } from '../../services/supabase'
 import { useFitLogStore } from '../../store/useFitLogStore'
 import { RefreshCw } from 'lucide-react'
 import { conectarSesionRealtime } from '../../services/sesionRealtime'
@@ -40,6 +40,7 @@ export default function Layout() {
       try {
         const { sesiones, registrosPeso } = await cargarDatosUsuario(usuario.id)
         useFitLogStore.getState().importarHistorialCompleto(sesiones, registrosPeso)
+        cargarEquivalenciasEnStore()
       } catch { /* offline: usar caché local */ }
     }
     setVolviendo(false)

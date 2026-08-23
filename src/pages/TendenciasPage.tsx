@@ -8,6 +8,7 @@ import { setEdicionEnCurso } from '../hooks/useSupabaseSync'
 import { generarInformePDF } from '../services/pdfReport'
 import type { Ejercicio, EtiquetaSerie, Sesion } from '../types/models'
 import { nombreCanonico, matchesEjercicio } from '../utils/normalizar'
+import { useHistorialRef } from '../hooks/useHistorialRef'
 import { GRUPOS_VISTA, GRUPO_OTROS, grupoDeEjercicio, type GrupoId } from '../utils/gruposMusculares'
 
 const MESES_ES_CORTO = [
@@ -25,6 +26,8 @@ interface PuntoSesion {
   volumen:  number
   rm1Max:   number
   etiqueta?: EtiquetaSerie
+  /** Gimnasio de la sesión (undefined = Entrena-T) */
+  gimnasio?: Sesion['gimnasio']
   pesoMA?:  number
   rm1MA?:   number
   repsMA?:  number
@@ -89,7 +92,8 @@ function procesarDatos(sesiones: Sesion[], ejercicioId: string, nombre: string):
       const rm1Max  = Math.max(...val.map((s) => epley(s.pesoKg as number, s.reps as number)))
       const serie   = val.find((s) => (s.pesoKg as number) === pesoMax)
       return [{ fecha: formatFecha(sesion.fecha), fechaISO: sesion.fecha,
-                pesoMax, repsMax, volumen, rm1Max, etiqueta: serie?.etiqueta }]
+                pesoMax, repsMax, volumen, rm1Max, etiqueta: serie?.etiqueta,
+                ...(sesion.gimnasio ? { gimnasio: sesion.gimnasio } : {}) }]
     })
 
   const pesoMA = mediaMovil(puntos.map((p) => p.pesoMax))
@@ -252,6 +256,7 @@ function SVGLineChart({ data, values, maValues, color, unit }: LineChartProps) {
                 <circle cx={cx} cy={cy - 11} r={3.5} fill={ETIQUETA_COLOR[p.etiqueta]} />
               )}
               {isA && <circle cx={cx} cy={cy} r={9} fill={color} opacity={0.15} />}
+              {p.gimnasio === 'fitnesspark' && <circle cx={cx} cy={cy} r={isA ? 8.5 : 7} fill="none" stroke={color} strokeWidth={1.2} strokeDasharray="2 1.5" opacity={0.9} />}
               <circle cx={cx} cy={cy} r={isA ? 5.5 : 4} fill={color} stroke="#09090b" strokeWidth={2}
                 onMouseEnter={() => setActiveIdx(i)}
                 onTouchEnd={(e) => { e.preventDefault(); setActiveIdx((p) => p === i ? null : i) }}
@@ -397,7 +402,7 @@ function CalendarioCalor({ sesionDates }: { sesionDates: Set<string> }) {
 export default function TendenciasPage() {
   const navigate          = useNavigate()
   const ejercicios        = useFitLogStore(useShallow((s) => s.ejercicios))
-  const historialSesiones = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const historialSesiones = useHistorialRef()  // kg Entrena-T equivalentes
   const usuario           = getUsuarioActivo()
   const sorted = useMemo(
     () => [...ejercicios].sort((a, b) => a.dia - b.dia || a.orden - b.orden),
@@ -568,7 +573,7 @@ export default function TendenciasPage() {
 // ── ResumenGeneral ────────────────────────────────────────────────────────────
 
 function ResumenGeneral() {
-  const historial  = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const historial  = useHistorialRef()  // kg Entrena-T equivalentes
   const ejercicios = useFitLogStore(useShallow((s) => s.ejercicios))
   const [panelPR, setPanelPR] = useState<{ id: string; nombre: string } | null>(null)
 
@@ -1239,7 +1244,7 @@ function SelectorGrupoMuscular({
 // ── PanelEjercicio ────────────────────────────────────────────────────────────
 
 function PanelEjercicio({ ejercicioId }: { ejercicioId: string }) {
-  const historial  = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const historial  = useHistorialRef()  // kg Entrena-T equivalentes
   const ejercicios = useFitLogStore(useShallow((s) => s.ejercicios))
   const nombre     = useMemo(
     () => ejercicios.find((e) => e.id === ejercicioId)?.nombre ?? '',

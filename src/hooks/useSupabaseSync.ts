@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { cargarDatosUsuario, getUsuarioActivo, getIdActivo, RUBEN_UUID, respaldarConfigEjerciciosSiFalta } from '../services/supabase'
+import { cargarDatosUsuario, getUsuarioActivo, getIdActivo, RUBEN_UUID, respaldarConfigEjerciciosSiFalta, cargarEquivalenciasEnStore } from '../services/supabase'
 import { useFitLogStore } from '../store/useFitLogStore'
 
 // ---------------------------------------------------------------------------
@@ -165,6 +165,7 @@ export function useSupabaseSync(): void {
 
     // Pull inmediato al montar
     pullHistorialInvitado()
+    cargarEquivalenciasEnStore()
     lastRef.current = Date.now()
 
     // Respaldo único: si Supabase no tiene la config de ejercicios de este
@@ -194,6 +195,7 @@ export function useSupabaseSync(): void {
       if (document.visibilityState === 'visible') {
         lastRef.current = Date.now()
         pullHistorialInvitado()
+        cargarEquivalenciasEnStore()
       }
     }
     document.addEventListener('visibilitychange', onVisible)

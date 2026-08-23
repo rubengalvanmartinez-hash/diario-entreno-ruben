@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Dumbbell, Scale, Ruler, AlertCircle, RefreshCw, Users, ChevronDown } from 'lucide-react'
+import { Dumbbell, Scale, Ruler, AlertCircle, RefreshCw, Users, ChevronDown, MapPin } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectTotalPendientes } from '../store/useFitLogStore'
 import {
@@ -9,10 +9,12 @@ import {
   cargarDatosUsuario,
   obtenerEjerciciosUsuario,
   crearEjerciciosDesdeTemplate,
+  cargarEquivalenciasEnStore,
   setPerfilVisto,
   getPerfilVisto,
   type UsuarioSupabase,
 } from '../services/supabase'
+import { GIMNASIOS, type GimnasioId } from '../types/models'
 
 const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
 const MESES       = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
@@ -37,6 +39,9 @@ export default function HomePage() {
         </div>
         <p className="mt-1 text-sm text-zinc-400 capitalize">{fechaLarga()}</p>
       </div>
+
+      {/* Gimnasio de hoy */}
+      <SelectorGimnasio />
 
       {/* Sesión en curso — banner de continuación */}
       {sesionActiva && (
@@ -115,6 +120,7 @@ function SelectorPerfilAdmin() {
       window.dispatchEvent(new Event('storage'))
       const { sesiones, registrosPeso } = await cargarDatosUsuario(u.id)
       useFitLogStore.getState().importarHistorialCompleto(sesiones, registrosPeso)
+      cargarEquivalenciasEnStore()
       const ejercicios = await obtenerEjerciciosUsuario(u.id)
       if (ejercicios) {
         useFitLogStore.getState().importarEjercicios(ejercicios)
@@ -281,5 +287,55 @@ function ActionCard({
       </div>
       <span className="ml-auto text-zinc-600 text-xl">›</span>
     </button>
+  )
+}
+
+// ── SelectorGimnasio ──────────────────────────────────────────────────────────
+// Entrena-T es la referencia; Fitness Park registra los kg reales de sus máquinas
+// y la app los convierte con la equivalencia de cada ejercicio.
+
+function SelectorGimnasio() {
+  const gimnasioActual = useFitLogStore((s) => s.gimnasioActual)
+  const sesionActiva   = useFitLogStore(useShallow((s) => s.sesionActiva))
+  const setGimnasioActual = useFitLogStore((s) => s.setGimnasioActual)
+  const cambiarGimnasioSesionActiva = useFitLogStore((s) => s.cambiarGimnasioSesionActiva)
+  const nEquivalencias = useFitLogStore((s) => Object.keys(s.equivalencias).length)
+
+  const elegir = (g: GimnasioId) => {
+    if (sesionActiva) cambiarGimnasioSesionActiva(g)
+    else setGimnasioActual(g)
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Hoy entreno en</p>
+      <div className="grid grid-cols-2 gap-2">
+        {(Object.keys(GIMNASIOS) as GimnasioId[]).map((g) => {
+          const activo = g === gimnasioActual
+          const esRef  = g === 'entrenat'
+          return (
+            <button
+              key={g}
+              onClick={() => elegir(g)}
+              aria-pressed={activo}
+              className={[
+                'flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors',
+                activo
+                  ? (esRef ? 'bg-blue-500/10 border-blue-500 text-white' : 'bg-orange-500/10 border-orange-500 text-white')
+                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 active:bg-zinc-800',
+              ].join(' ')}
+            >
+              <MapPin size={18} className={activo ? (esRef ? 'text-blue-400' : 'text-orange-400') : 'text-zinc-600'} />
+              <span className="min-w-0">
+                <span className="block text-sm font-bold">{GIMNASIOS[g].nombre}</span>
+                <span className="block text-[10px] text-zinc-500">
+                  {esRef ? 'Referencia' : nEquivalencias > 0 ? `${nEquivalencias} equivalencia${nEquivalencias !== 1 ? 's' : ''}` : 'Equivalente'}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }

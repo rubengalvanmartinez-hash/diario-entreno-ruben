@@ -6,6 +6,7 @@ import type {
   Serie,
   EtiquetaSerie,
   DiaId,
+  GimnasioId,
   TipoSesion,
   Ejercicio,
   RegistroComposicion,
@@ -309,6 +310,26 @@ export async function eliminarUsuario(id: string): Promise<void> {
  * Sincroniza la sesión completa al terminar.
  * Idempotente: elimina filas previas del sesion_id antes de insertar.
  */
+/**
+ * INSERT en entrenos con tolerancia a que la columna gimnasio aún no exista
+ * (hasta que el admin ejecute el SQL de v2.5.0): reintenta sin ella.
+ */
+async function insertarEntrenos(rows: Record<string, unknown>[], origen: string): Promise<void> {
+  const { error } = await supabase.from('entrenos').insert(rows)
+  if (!error) return
+  const msg = String(error.message ?? '')
+  if (error.code === 'PGRST204' || /gimnasio/i.test(msg)) {
+    console.warn(`[Supabase] ${origen}: la columna gimnasio no existe aún — reintentando sin ella (pendiente ejecutar el SQL de v2.5.0)`)
+    const sinGimnasio = rows.map((r) => { const copia = { ...r }; delete copia.gimnasio; return copia })
+    const { error: error2 } = await supabase.from('entrenos').insert(sinGimnasio)
+    if (!error2) return
+    console.error(`[Supabase] ${origen} INSERT:`, error2)
+    throw error2
+  }
+  console.error(`[Supabase] ${origen} INSERT:`, error)
+  throw error
+}
+
 export async function sincronizarEntrenoSupabase(
   usuarioId: string,
   sesion: Sesion,
@@ -341,14 +362,11 @@ export async function sincronizarEntrenoSupabase(
       etiqueta: serie.etiqueta ?? null,
       nota: ej.notaSesion || null,
       ayuda_fede: ej.ayudaFede ?? false,
+      gimnasio: sesion.gimnasio ?? null,
     })),
   )
   if (rows.length === 0) return
-  const { error } = await supabase.from('entrenos').insert(rows)
-  if (error) {
-    console.error('[Supabase] sincronizarEntrenoSupabase INSERT:', error)
-    throw error
-  }
+  await insertarEntrenos(rows, 'sincronizarEntrenoSupabase')
 }
 
 /**
@@ -357,7 +375,7 @@ export async function sincronizarEntrenoSupabase(
  */
 export async function sincronizarEjercicioSupabase(
   usuarioId: string,
-  sesion: Pick<Sesion, 'id' | 'fecha' | 'dia'>,
+  sesion: Pick<Sesion, 'id' | 'fecha' | 'dia' | 'gimnasio'>,
   ejercicio: SesionEjercicio,
 ): Promise<void> {
   const nombreEj = ejercicio.nombreSustituido ?? ejercicio.nombreSnapshot
@@ -384,13 +402,10 @@ export async function sincronizarEjercicioSupabase(
     etiqueta: serie.etiqueta ?? null,
     nota: ejercicio.notaSesion || null,
     ayuda_fede: ejercicio.ayudaFede ?? false,
+    gimnasio: sesion.gimnasio ?? null,
   }))
   if (rows.length === 0) return
-  const { error } = await supabase.from('entrenos').insert(rows)
-  if (error) {
-    console.error('[Supabase] sincronizarEjercicioSupabase INSERT:', error)
-    throw error
-  }
+  await insertarEntrenos(rows, 'sincronizarEjercicioSupabase')
 }
 
 // ---------------------------------------------------------------------------
@@ -434,13 +449,18 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
   type SesionAccum = {
     fecha: string
     dia: string
+    gimnasio: GimnasioId | undefined
     ejercicios: Map<string, { rows: Record<string, unknown>[] }>
   }
   const sesionMap = new Map<string, SesionAccum>()
 
   for (const row of entrenos) {
     if (!sesionMap.has(row.sesion_id)) {
-      sesionMap.set(row.sesion_id, { fecha: row.fecha, dia: row.dia, ejercicios: new Map() })
+      sesionMap.set(row.sesion_id, {
+        fecha: row.fecha, dia: row.dia,
+        gimnasio: row.gimnasio === 'fitnesspark' ? 'fitnesspark' : undefined,
+        ejercicios: new Map(),
+      })
     }
     const s = sesionMap.get(row.sesion_id)!
     if (!s.ejercicios.has(row.ejercicio)) {
@@ -484,7 +504,10 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
       })
     }
 
-    sesiones.push({ id: sesionId, fecha: datos.fecha, dia, tipo, ejercicios, sincronizado: true })
+    sesiones.push({
+      id: sesionId, fecha: datos.fecha, dia, tipo, ejercicios, sincronizado: true,
+      ...(datos.gimnasio ? { gimnasio: datos.gimnasio } : {}),
+    })
   }
 
   sesiones.sort((a, b) => b.fecha.localeCompare(a.fecha))
@@ -880,6 +903,73 @@ export async function cargarMedidas(
     pantorrillaDer:  r.pantorrilla_der != null ? Number(r.pantorrilla_der) : undefined,
     abdomen:         r.abdomen        != null ? Number(r.abdomen)         : undefined,
   }))
+}
+
+// ---------------------------------------------------------------------------
+// Equivalencias entre gimnasios (tabla equivalencias_gimnasio)
+// ---------------------------------------------------------------------------
+
+/** Carga las equivalencias Fitness Park → Entrena-T del usuario: nombreCanonico → factor. */
+export async function cargarEquivalencias(usuarioId: string): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from('equivalencias_gimnasio')
+    .select('ejercicio, gimnasio, factor')
+    .eq('usuario_id', usuarioId)
+    .eq('gimnasio', 'fitnesspark')
+  if (error) throw error
+  const out: Record<string, number> = {}
+  for (const r of data ?? []) {
+    const f = Number(r.factor)
+    if (isFinite(f) && f > 0) out[String(r.ejercicio)] = f
+  }
+  return out
+}
+
+/** Guarda (upsert) el factor de un ejercicio en Fitness Park. */
+export async function guardarEquivalencia(usuarioId: string, clave: string, factor: number): Promise<void> {
+  const { error } = await supabase
+    .from('equivalencias_gimnasio')
+    .upsert({ usuario_id: usuarioId, ejercicio: clave, gimnasio: 'fitnesspark', factor, updated_at: new Date().toISOString() }, { onConflict: 'usuario_id,ejercicio,gimnasio' })
+  if (error) throw error
+}
+
+/** Elimina la equivalencia de un ejercicio en Fitness Park. */
+export async function eliminarEquivalencia(usuarioId: string, clave: string): Promise<void> {
+  const { error } = await supabase
+    .from('equivalencias_gimnasio')
+    .delete()
+    .eq('usuario_id', usuarioId)
+    .eq('ejercicio', clave)
+    .eq('gimnasio', 'fitnesspark')
+  if (error) throw error
+}
+
+/** Carga las equivalencias del perfil activo en el store (silencioso si la tabla aún no existe). */
+export async function cargarEquivalenciasEnStore(): Promise<void> {
+  const id = getIdActivo()
+  if (!id) return
+  try {
+    const eq = await cargarEquivalencias(id)
+    const local = useFitLogStore.getState().equivalencias
+    if (Object.keys(eq).length === 0 && Object.keys(local).length > 0) {
+      // Remoto vacío pero hay locales (p. ej. definidas antes de existir la tabla): respaldarlas
+      for (const [clave, factor] of Object.entries(local)) await guardarEquivalencia(id, clave, factor)
+      console.log(`[Supabase] ${Object.keys(local).length} equivalencias locales respaldadas`)
+      return
+    }
+    useFitLogStore.getState().importarEquivalencias(eq)
+  } catch (e) {
+    console.warn('[Supabase] equivalencias no cargadas (¿falta el SQL de v2.5.0?):', e)
+  }
+}
+
+/** Fija o borra una equivalencia en el store y la sincroniza a Supabase (fire-and-forget). */
+export function setEquivalenciaSync(clave: string, factor: number | null): void {
+  useFitLogStore.getState().setEquivalencia(clave, factor)
+  const id = getIdActivo()
+  if (!id) return
+  const p = factor === null ? eliminarEquivalencia(id, clave) : guardarEquivalencia(id, clave, factor)
+  p.catch((e) => console.warn('[Supabase] equivalencia no sincronizada (¿falta el SQL de v2.5.0?):', e))
 }
 
 // ---------------------------------------------------------------------------

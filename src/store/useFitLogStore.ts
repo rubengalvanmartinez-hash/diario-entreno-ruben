@@ -12,6 +12,8 @@ import {
   type RegistroMedidas,
   type PerfilCorporal,
   type Serie,
+  type GimnasioId,
+  GIMNASIO_REFERENCIA,
   crearSesionEjercicio,
   crearSeriesVacias,
   fechaHoy,
@@ -60,6 +62,12 @@ export interface FitLogState {
   // ── Sync ───────────────────────────────────────────────────────────────
   /** Timestamp del último pull exitoso de Supabase. Cambiar fuerza re-render de suscriptores. */
   ultimaSyncTimestamp: number
+
+  // ── Gimnasios ──────────────────────────────────────────────────────────
+  /** Gimnasio en el que se entrena ahora (las sesiones nuevas lo llevan) */
+  gimnasioActual: GimnasioId
+  /** nombreCanonico(ejercicio) → factor kg Entrena-T por kg Fitness Park */
+  equivalencias: Record<string, number>
 }
 
 export interface FitLogActions {
@@ -160,6 +168,15 @@ export interface FitLogActions {
   setObjetivoEntreno: (ejercicioNombre: string, obj: 'subir' | 'bajar' | null) => void
   /** Guarda (o borra si null) el peso objetivo en kg para un ejercicio */
   setObjetivoPesoEntreno: (ejercicioNombre: string, kg: number | null) => void
+
+  // ── Gimnasios ──────────────────────────────────────────────────────────
+  setGimnasioActual: (g: GimnasioId) => void
+  /** Cambia el gimnasio de la sesión activa (y el actual) */
+  cambiarGimnasioSesionActiva: (g: GimnasioId) => void
+  /** Fija (o borra con null) el factor de equivalencia de un ejercicio (clave: nombre canónico) */
+  setEquivalencia: (clave: string, factor: number | null) => void
+  /** Reemplaza todas las equivalencias (carga desde Supabase) */
+  importarEquivalencias: (eq: Record<string, number>) => void
 }
 
 type FitLogStore = FitLogState & FitLogActions
@@ -258,6 +275,8 @@ const INITIAL_STATE: FitLogState = {
   },
   isAuthenticated: false,
   ultimaSyncTimestamp: 0,
+  gimnasioActual: GIMNASIO_REFERENCIA,
+  equivalencias: {},
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +303,7 @@ export const useFitLogStore = create<FitLogStore>()(
           fecha: fechaHoy(),
           dia,
           tipo: 'normal',
+          gimnasio: get().gimnasioActual,
           ejercicios: sesionEjercicios,
           sincronizado: false,
         }
@@ -302,6 +322,7 @@ export const useFitLogStore = create<FitLogStore>()(
           fecha: fechaHoy(),
           dia: 'parcial',
           tipo: 'parcial',
+          gimnasio: get().gimnasioActual,
           ejercicios: seleccionados,
           sincronizado: false,
         }
@@ -321,6 +342,7 @@ export const useFitLogStore = create<FitLogStore>()(
           fecha: fechaHoy(),
           dia: 'extra',
           tipo: 'extra',
+          gimnasio: get().gimnasioActual,
           ejercicios: [ejercicioExtra],
           sincronizado: false,
         }
@@ -725,6 +747,32 @@ export const useFitLogStore = create<FitLogStore>()(
           else next[ejercicioNombre] = obj
           return { objetivosEntreno: next }
         })
+      },
+
+      // ── Gimnasios ────────────────────────────────────────────────────
+
+      setGimnasioActual(g) {
+        set({ gimnasioActual: g })
+      },
+
+      cambiarGimnasioSesionActiva(g) {
+        set((s) => ({
+          gimnasioActual: g,
+          sesionActiva: s.sesionActiva ? { ...s.sesionActiva, gimnasio: g } : null,
+        }))
+      },
+
+      setEquivalencia(clave, factor) {
+        set((s) => {
+          const next = { ...s.equivalencias }
+          if (factor === null || !(factor > 0)) delete next[clave]
+          else next[clave] = factor
+          return { equivalencias: next }
+        })
+      },
+
+      importarEquivalencias(eq) {
+        set({ equivalencias: eq })
       },
 
       setObjetivoPesoEntreno(ejercicioNombre, kg) {

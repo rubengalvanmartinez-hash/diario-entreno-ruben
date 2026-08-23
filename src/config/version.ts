@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.4.2'
+export const APP_VERSION = '2.5.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,24 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.5.0',
+    fecha: '23/08/2026',
+    tipo: 'mayor',
+    cambios: [
+      'DOS GIMNASIOS: Entrena-T es la referencia de la evolución; Fitness Park es equivalente. En cada sesión se registra el peso REAL de la máquina donde estás y la app lo convierte a "kg Entrena-T equivalentes" para tendencias, récords, último entreno y progreso',
+      'Inicio: selector "Hoy entreno en" (Entrena-T / Fitness Park). Las sesiones nuevas llevan el gimnasio; en la cabecera de la sesión aparece 📍 ET/FP (tocar para cambiar)',
+      'Equivalencia por ejercicio = kg Entrena-T por cada kg de Fitness Park (100 kg ET = 80 kg FP → 1,25). Sin equivalencia (peso libre, mancuernas) los kg cuentan igual en los dos gimnasios',
+      'En Fitness Park, la tarjeta del ejercicio muestra la referencia convertida: "Ref. Entrena-T 80 kg → aquí ≈ 64 kg" y los chips del último entreno en kg de esa máquina; la comparación de colores también se hace en kg de la máquina',
+      'Tarjeta "Equivalencia Fitness Park" en la sesión: ver, definir, ajustar o quitar la equivalencia. Al guardar un ejercicio en FP sin equivalencia, la app propone la pareja (último ET ↔ lo que acabas de hacer) y tú confirmas o corriges',
+      'Dinámica bidireccional: si subes en Entrena-T, en Fitness Park verás el nuevo equivalente; si subes en Fitness Park, Tendencias lo cuenta como su equivalente en Entrena-T. El factor solo cambia cuando tú lo ajustas',
+      'Tendencias: historial en kg Entrena-T equivalentes; los puntos de Fitness Park llevan un anillo discontinuo',
+      'Ajustes → Gimnasios: lista de equivalencias con ajuste y borrado',
+      'Supabase: columna gimnasio en entrenos + tabla equivalencias_gimnasio (supabase_v2.5.0.sql, pendiente de ejecutar por el admin). Hasta entonces el sync reintenta sin la columna y las equivalencias viven en local; al crear la tabla se respaldan solas',
+      'Sesión en vivo: el gimnasio viaja en el snapshot entre móviles',
+      'Tests: 22 casos de conversión en test-logic.mts; verificado en navegador (Tendencias con punto FP a 75 kg = 60 × 1,25, tarjeta de sesión, propuesta de equivalencia, Ajustes, móvil)',
+    ],
+  },
   {
     version: '2.4.2',
     fecha: '23/08/2026',

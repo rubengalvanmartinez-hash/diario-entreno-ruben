@@ -2,11 +2,11 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronUp, ChevronDown, Trash2, Plus, ImagePlus,
-  X, LogOut, FileSpreadsheet, RefreshCw, CheckCircle2, AlertCircle, ChevronRight, Users, Database,
+  X, LogOut, FileSpreadsheet, RefreshCw, CheckCircle2, AlertCircle, ChevronRight, Users, Database, MapPin,
 } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
-import { getUsuarioActivo, cerrarSesionLocal, sincronizarEjerciciosUsuario, supabase, forzarSincronizacionPendientes, getRubenUUID, cargarDatosUsuario, asegurarUsuarioRuben } from '../services/supabase'
+import { getUsuarioActivo, cerrarSesionLocal, sincronizarEjerciciosUsuario, supabase, forzarSincronizacionPendientes, getRubenUUID, cargarDatosUsuario, asegurarUsuarioRuben, setEquivalenciaSync } from '../services/supabase'
 import {
   iniciarSesionGoogle,
   cerrarSesionGoogle,
@@ -17,6 +17,7 @@ import {
 import { guardarImagen, obtenerImagen, eliminarImagen } from '../services/imageDB'
 import type { DiaId, Ejercicio, Sesion, RegistroPeso, RegistroComposicion, PerfilCorporal } from '../types/models'
 import { normalizarNombre, nombreCanonico } from '../utils/normalizar'
+import { factorDesdePareja, aGimnasio, redondearPeso } from '../utils/equivalencias'
 import { APP_VERSION, CHANGELOG } from '../config/version'
 
 const DIAS: DiaId[] = [1, 2, 3]
@@ -64,6 +65,11 @@ export default function AjustesPage() {
       <section className="flex flex-col gap-5">
         <SectionLabel>Ejercicios por día</SectionLabel>
         {DIAS.map((dia) => <SeccionDia key={dia} dia={dia} />)}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <SectionLabel>Gimnasios</SectionLabel>
+        <SeccionEquivalencias />
       </section>
 
       <section className="flex flex-col gap-3">
@@ -1378,6 +1384,105 @@ function SeccionRecuperarEjercicios() {
             </>
           )}
         </div>
+      )}
+    </div>
+  )
+}
+
+// ── SeccionEquivalencias (gimnasios) ──────────────────────────────────────────
+// Entrena-T es la referencia. Cada equivalencia dice cuántos kg de Entrena-T
+// vale 1 kg de la máquina de Fitness Park para ese ejercicio.
+
+function SeccionEquivalencias() {
+  const equivalencias = useFitLogStore(useShallow((s) => s.equivalencias))
+  const ejercicios    = useFitLogStore(useShallow((s) => s.ejercicios))
+  const [editando, setEditando] = useState<string | null>(null)
+  const [kgGym, setKgGym] = useState('')
+
+  // Nombre "bonito" para una clave canónica: el ejercicio de config que casa, o la clave
+  const nombreDe = (clave: string) => ejercicios.find((e) => nombreCanonico(e.nombre) === clave)?.nombre ?? clave
+
+  const claves = Object.keys(equivalencias).sort((a, b) => nombreDe(a).localeCompare(nombreDe(b), 'es'))
+
+  const guardar = (clave: string) => {
+    const gym = parseFloat(kgGym.replace(',', '.'))
+    const f = factorDesdePareja(100, gym)
+    if (f === null) return
+    setEquivalenciaSync(clave, f)
+    setEditando(null)
+  }
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <div className="size-9 rounded-xl bg-orange-900/30 flex items-center justify-center shrink-0">
+          <MapPin size={16} className="text-orange-400" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-white">Equivalencias Fitness Park → Entrena-T</p>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            {claves.length === 0
+              ? 'Aún no hay ninguna. Se crean al entrenar en Fitness Park.'
+              : `${claves.length} ejercicio${claves.length !== 1 ? 's' : ''} con equivalencia`}
+          </p>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-zinc-600 leading-snug">
+        Entrena-T es la referencia de tu evolución. En Fitness Park registras los kg reales de la máquina y la app
+        los convierte con estas equivalencias. Sin equivalencia, un ejercicio cuenta igual en los dos gimnasios (peso libre, mancuernas…).
+      </p>
+
+      {claves.length > 0 && (
+        <ul className="flex flex-col gap-2 pt-2 border-t border-zinc-800">
+          {claves.map((clave) => {
+            const f = equivalencias[clave]
+            const gymPor100 = redondearPeso(aGimnasio(100, f))
+            return (
+              <li key={clave} className="flex flex-col gap-2 bg-zinc-950/60 rounded-xl px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">{nombreDe(clave)}</p>
+                    <p className="text-xs text-zinc-400">
+                      100 kg ET ≈ <span className="text-orange-300 font-bold">{gymPor100} kg</span> FP
+                      <span className="text-zinc-600"> · factor {f.toFixed(3)}</span>
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => { setEditando(editando === clave ? null : clave); setKgGym(String(gymPor100)) }}
+                      className="rounded-lg bg-zinc-800 px-2.5 py-1.5 text-xs font-bold text-zinc-200 active:bg-zinc-700"
+                    >
+                      Ajustar
+                    </button>
+                    <button
+                      onClick={() => setEquivalenciaSync(clave, null)}
+                      className="p-1.5 text-zinc-600 active:text-red-400"
+                      aria-label={`Quitar equivalencia de ${nombreDe(clave)}`}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+                {editando === clave && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
+                    <span className="text-xs text-zinc-400">100 kg ET =</span>
+                    <input
+                      inputMode="decimal"
+                      value={kgGym}
+                      onChange={(e) => setKgGym(e.target.value)}
+                      className="w-20 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-sm font-bold text-white text-right focus:outline-none focus:border-orange-500"
+                    />
+                    <span className="text-xs text-zinc-400">kg FP</span>
+                    <button onClick={() => guardar(clave)} className="ml-auto rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-bold text-white active:bg-orange-700">
+                      Guardar
+                    </button>
+                  </div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
       )}
     </div>
   )

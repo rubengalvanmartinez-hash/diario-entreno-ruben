@@ -4,6 +4,18 @@
 
 export type DiaId = 1 | 2 | 3
 
+/**
+ * Gimnasios. Entrena-T es la referencia: toda la evolución se mide en
+ * "kg Entrena-T equivalentes". Fitness Park registra el peso real de sus
+ * máquinas y se convierte con un factor por ejercicio (ver utils/equivalencias).
+ */
+export type GimnasioId = 'entrenat' | 'fitnesspark'
+export const GIMNASIO_REFERENCIA: GimnasioId = 'entrenat'
+export const GIMNASIOS: Record<GimnasioId, { nombre: string; corto: string }> = {
+  entrenat:    { nombre: 'Entrena-T',    corto: 'ET' },
+  fitnesspark: { nombre: 'Fitness Park', corto: 'FP' },
+}
+
 // ---------------------------------------------------------------------------
 // Ejercicio  (configuración persistente, no cambia entre sesiones)
 // ---------------------------------------------------------------------------
@@ -73,6 +85,8 @@ export interface Sesion {
   /** 1-3 para días normales; 'parcial' para sesión de ejercicios sueltos; 'extra' para ejercicio puntual */
   dia: DiaId | 'parcial' | 'extra'
   tipo?: TipoSesion
+  /** Gimnasio donde se hizo la sesión; undefined = Entrena-T (referencia) */
+  gimnasio?: GimnasioId
   ejercicios: SesionEjercicio[]
   sincronizado: boolean
 }

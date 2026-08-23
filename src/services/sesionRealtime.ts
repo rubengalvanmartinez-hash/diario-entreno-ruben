@@ -252,7 +252,7 @@ function enviar(op: OpSesion, sesionId?: string): void {
 
 /** true si cambió algo de estructura (no series/nota/fede, que viajan como ops) */
 function cambioEstructural(a: Sesion, b: Sesion): boolean {
-  if (a.fecha !== b.fecha || a.dia !== b.dia || a.ejercicios.length !== b.ejercicios.length) return true
+  if (a.fecha !== b.fecha || a.dia !== b.dia || a.gimnasio !== b.gimnasio || a.ejercicios.length !== b.ejercicios.length) return true
   return a.ejercicios.some((ea, i) => {
     const eb = b.ejercicios[i]
     return ea.ejercicioId !== eb.ejercicioId

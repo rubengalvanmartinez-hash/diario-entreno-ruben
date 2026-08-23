@@ -5,10 +5,13 @@ import type { EtiquetaSerie, Sesion } from '../types/models'
 import { obtenerImagen } from '../services/imageDB'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectProgresoTotal, selectProgresoCompletados } from '../store/useFitLogStore'
-import { serieConDatos, type DiaId, type SesionEjercicio, type Serie } from '../types/models'
+import { serieConDatos, GIMNASIOS, type DiaId, type SesionEjercicio, type Serie, type GimnasioId } from '../types/models'
+import { useHistorialRef } from '../hooks/useHistorialRef'
+import { factorEquivalencia, tieneEquivalencia, aGimnasio, redondearPeso, factorDesdePareja, sesionAReferencia } from '../utils/equivalencias'
+import { setEquivalenciaSync } from '../services/supabase'
 import { getUsuarioActivo, sincronizarEntrenoSupabase, getRubenUUID, getPerfilVisto, getIdActivo, type UsuarioActivo } from '../services/supabase'
 import { pullHistorialInvitado } from '../hooks/useSupabaseSync'
-import { normalizarNombre, matchesEjercicio } from '../utils/normalizar'
+import { normalizarNombre, nombreCanonico, matchesEjercicio } from '../utils/normalizar'
 import { sincronizarSesion } from '../services/googleSheets'
 import { enqueueEjercicio, subscribeSyncStatus, type SyncStatus } from '../services/syncQueue'
 import { conectarSesionRealtime, emitirOp, suscribirOpsRemotas, useEstadoRealtime } from '../services/sesionRealtime'
@@ -226,7 +229,8 @@ export default function SesionPage() {
   const progresoTotal      = useFitLogStore(selectProgresoTotal)
   const progresoCompletados = useFitLogStore(selectProgresoCompletados)
 
-  const historialSesiones  = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const historialSesiones  = useHistorialRef()  // kg Entrena-T equivalentes
+  const cambiarGimnasioSesionActiva = useFitLogStore((s) => s.cambiarGimnasioSesionActiva)
   const todosLosEjercicios = useFitLogStore(useShallow((s) => s.ejercicios))
   const [showLista,           setShowLista]           = useState(false)
   const [showCompletado,      setShowCompletado]      = useState(false)
@@ -389,9 +393,22 @@ export default function SesionPage() {
           </button>
 
           <div className="flex-1">
-            <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">
-              {DIA_NOMBRE[String(dia)]}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider whitespace-nowrap">
+                {DIA_NOMBRE[String(dia)]}
+              </p>
+              <button
+                onClick={() => cambiarGimnasioSesionActiva(sesionActiva.gimnasio === 'fitnesspark' ? 'entrenat' : 'fitnesspark')}
+                title={`Gimnasio: ${GIMNASIOS[sesionActiva.gimnasio ?? 'entrenat'].nombre} (tocar para cambiar)`}
+                aria-label={`Gimnasio: ${GIMNASIOS[sesionActiva.gimnasio ?? 'entrenat'].nombre}`}
+                className={[
+                  'text-[10px] font-bold rounded-full px-2 py-0.5 leading-none whitespace-nowrap',
+                  sesionActiva.gimnasio === 'fitnesspark' ? 'bg-orange-500/15 text-orange-400' : 'bg-zinc-800 text-zinc-400',
+                ].join(' ')}
+              >
+                📍 {GIMNASIOS[sesionActiva.gimnasio ?? 'entrenat'].corto}
+              </button>
+            </div>
             <div className="mt-1 flex items-center gap-2">
               <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                 <div
@@ -429,6 +446,7 @@ export default function SesionPage() {
             key={`${sesionActiva.id}-${indice}`}
             ejercicio={ejercicioActual}
             indice={indice}
+            gimnasio={sesionActiva.gimnasio}
             onGuardar={handleGuardar}
             onSaltar={handleSaltar}
           />
@@ -504,17 +522,23 @@ export default function SesionPage() {
 function EjercicioCard({
   ejercicio,
   indice,
+  gimnasio,
   onGuardar,
   onSaltar,
 }: {
   ejercicio: SesionEjercicio
   indice: number
+  gimnasio: GimnasioId | undefined
   onGuardar: (datos: SesionEjercicio) => void
   onSaltar: () => void
 }) {
   const nombre = ejercicio.nombreSustituido ?? ejercicio.nombreSnapshot
 
-  const historialSesiones = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const historialSesiones = useHistorialRef()  // kg Entrena-T equivalentes
+  const equivalencias     = useFitLogStore(useShallow((s) => s.equivalencias))
+  const esFP   = gimnasio === 'fitnesspark'
+  const factor = factorEquivalencia(equivalencias, nombre, gimnasio)
+  const hayEq  = tieneEquivalencia(equivalencias, nombre, gimnasio)
 
   // Nota fija del ejercicio (de la configuración)
   const notasFijas = useFitLogStore(
@@ -522,7 +546,7 @@ function EjercicioCard({
   )
 
   // Último y penúltimo registro de este ejercicio (para comparación histórica)
-  const { ultimoEntreno, penultimoEntreno } = useMemo(() => {
+  const { ultimoEntreno, penultimoEntreno, refMaxET } = useMemo(() => {
     const ordenado = [...historialSesiones].sort((a, b) => b.fecha.localeCompare(a.fecha))
     const encontrados: { fecha: string; series: Serie[]; ayudaFede: boolean }[] = []
     for (const sesion of ordenado) {
@@ -536,8 +560,18 @@ function EjercicioCard({
         if (encontrados.length === 2) break
       }
     }
-    return { ultimoEntreno: encontrados[0] ?? null, penultimoEntreno: encontrados[1] ?? null }
-  }, [historialSesiones, ejercicio.ejercicioId, nombre])
+    // El historial está en kg Entrena-T; si estamos en otro gimnasio con equivalencia, traducir a sus kg
+    const traducir = <T extends { series: Serie[] }>(e: T): T => factor === 1 ? e : {
+      ...e,
+      series: e.series.map((s) => (s.pesoKg === '' ? s : { ...s, pesoKg: redondearPeso(aGimnasio(Number(s.pesoKg), factor)) })),
+    }
+    return {
+      ultimoEntreno:    encontrados[0] ? traducir(encontrados[0]) : null,
+      penultimoEntreno: encontrados[1] ? traducir(encontrados[1]) : null,
+      /** Máximo del último entreno en kg Entrena-T (referencia) */
+      refMaxET: encontrados[0] ? (pesoMax(encontrados[0].series) ?? null) : null,
+    }
+  }, [historialSesiones, ejercicio.ejercicioId, nombre, factor])
 
   const [series,   setSeries]   = useState<Serie[]>(() => ejercicio.series.map((s) => ({ ...s })))
   const [pesosRaw, setPesosRaw] = useState<string[]>(() =>
@@ -736,6 +770,8 @@ function EjercicioCard({
     doGuardar()
   }
 
+  const [showEqModal, setShowEqModal] = useState(false)
+
   const handleGuardar = () => {
     // 1. Comprobar campos vacíos
     const vacias = series.filter((s) => s.reps === '' || s.pesoKg === '')
@@ -744,7 +780,12 @@ function EjercicioCard({
       setShowVaciosModal(true)
       return
     }
-    // 2. Comprobar etiquetas RIR/Fallo
+    // 2. En Fitness Park sin equivalencia y con referencia en Entrena-T: proponerla
+    if (esFP && !hayEq && refMaxET !== null && (pesoMax(buildFinalSeries()) ?? 0) > 0) {
+      setShowEqModal(true)
+      return
+    }
+    // 3. Comprobar etiquetas RIR/Fallo
     doGuardarConRir()
   }
 
@@ -778,7 +819,28 @@ function EjercicioCard({
         seriesActuales={series}
         objetivo={objetivoDir}
         objetivoPeso={objetivoPesoLocal}
+        referencia={esFP ? { factor, hayEq, refMaxET } : null}
       />
+
+      {/* Equivalencia Fitness Park ↔ Entrena-T */}
+      {esFP && (
+        <EquivalenciaCard
+          nombre={nombre}
+          factor={factor}
+          hayEq={hayEq}
+          refMaxET={refMaxET}
+          maxActual={pesoMax(buildFinalSeries())}
+        />
+      )}
+
+      {showEqModal && (
+        <ModalEquivalencia
+          nombre={nombre}
+          refMaxET={refMaxET ?? 0}
+          maxActual={pesoMax(buildFinalSeries()) ?? 0}
+          onCerrar={() => { setShowEqModal(false); doGuardarConRir() }}
+        />
+      )}
 
       {/* Objetivo próximo entreno */}
       <ObjetivoProximoEntreno
@@ -1038,12 +1100,15 @@ function UltimoEntrenoCard({
   seriesActuales,
   objetivo,
   objetivoPeso,
+  referencia,
 }: {
   ultimoEntreno: { fecha: string; series: Serie[]; ayudaFede: boolean } | null
   penultimoEntreno: { series: Serie[] } | null
   seriesActuales: Serie[]
   objetivo: 'subir' | 'bajar' | null
   objetivoPeso: number | null
+  /** En Fitness Park: factor aplicado y referencia Entrena-T del último entreno */
+  referencia?: { factor: number; hayEq: boolean; refMaxET: number | null } | null
 }) {
   const ultimaSyncTimestamp = useFitLogStore((s) => s.ultimaSyncTimestamp)
   if (!ultimoEntreno) {
@@ -1117,6 +1182,15 @@ function UltimoEntrenoCard({
           )}
         </div>
 
+        {/* Referencia Entrena-T cuando se entrena en Fitness Park */}
+        {referencia && referencia.refMaxET !== null && (
+          <p className="text-[10px] text-zinc-500 mb-1">
+            {referencia.hayEq
+              ? <>Ref. Entrena-T <span className="text-zinc-300 font-semibold">{referencia.refMaxET} kg</span> → aquí ≈ <span className="text-orange-300 font-semibold">{redondearPeso(aGimnasio(referencia.refMaxET, referencia.factor))} kg</span> (×{(1 / referencia.factor).toFixed(2)})</>
+              : <span className="text-amber-500">Sin equivalencia Fitness Park: se muestran los kg de Entrena-T tal cual</span>}
+          </p>
+        )}
+
         {/* Línea 2: chips horizontales con flechas de comparación en tiempo real */}
         {seriesValidas.length === 0 ? (
           <p className="text-xs text-zinc-600 italic">Sin datos registrados</p>
@@ -1163,6 +1237,182 @@ function UltimoEntrenoCard({
             )}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+
+// ── Equivalencia Fitness Park ↔ Entrena-T ─────────────────────────────────────
+
+/** Formulario "X kg en Entrena-T equivalen a Y kg aquí" (compartido por tarjeta y modal). */
+function FormEquivalencia({
+  nombre, kgRefInicial, kgGymInicial, onGuardado, onCancelar, textoGuardar = 'Guardar equivalencia',
+}: {
+  nombre: string
+  kgRefInicial: number | null
+  kgGymInicial: number | null
+  onGuardado: () => void
+  onCancelar?: () => void
+  textoGuardar?: string
+}) {
+  const [kgRef, setKgRef] = useState(kgRefInicial !== null ? String(kgRefInicial) : '')
+  const [kgGym, setKgGym] = useState(kgGymInicial !== null ? String(kgGymInicial) : '')
+  const ref = parseFloat(kgRef.replace(',', '.'))
+  const gym = parseFloat(kgGym.replace(',', '.'))
+  const factor = factorDesdePareja(ref, gym)
+
+  const guardar = () => {
+    if (factor === null) return
+    setEquivalenciaSync(nombreCanonico(nombre), factor)
+    onGuardado()
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Entrena-T</span>
+          <div className="flex items-center gap-1">
+            <input
+              inputMode="decimal"
+              value={kgRef}
+              onChange={(e) => setKgRef(e.target.value)}
+              placeholder="100"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-base font-bold text-white text-right focus:outline-none focus:border-blue-500"
+            />
+            <span className="text-xs text-zinc-500">kg</span>
+          </div>
+        </label>
+        <span className="text-zinc-500 text-lg pb-2">=</span>
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400">Fitness Park</span>
+          <div className="flex items-center gap-1">
+            <input
+              inputMode="decimal"
+              value={kgGym}
+              onChange={(e) => setKgGym(e.target.value)}
+              placeholder="80"
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-base font-bold text-white text-right focus:outline-none focus:border-orange-500"
+            />
+            <span className="text-xs text-zinc-500">kg</span>
+          </div>
+        </label>
+      </div>
+      <p className="text-[11px] text-zinc-500 leading-snug">
+        {factor !== null
+          ? <>Cada kg de esta máquina contará como <span className="text-white font-semibold">{factor.toFixed(3)} kg</span> de Entrena-T. 100 kg ET → {redondearPeso(aGimnasio(100, factor))} kg aquí.</>
+          : 'Introduce los dos pesos: lo que haces en Entrena-T y lo que te cuesta lo mismo en esta máquina.'}
+      </p>
+      <div className="flex gap-2">
+        {onCancelar && (
+          <button onClick={onCancelar} className="flex-1 rounded-xl bg-zinc-800 py-2.5 text-sm font-bold text-zinc-300 active:bg-zinc-700">
+            Cancelar
+          </button>
+        )}
+        <button
+          onClick={guardar}
+          disabled={factor === null}
+          className="flex-1 rounded-xl bg-orange-600 py-2.5 text-sm font-bold text-white active:bg-orange-700 disabled:opacity-40"
+        >
+          {textoGuardar}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** Tarjeta en la sesión (solo Fitness Park): estado de la equivalencia y ajuste. */
+function EquivalenciaCard({
+  nombre, factor, hayEq, refMaxET, maxActual,
+}: {
+  nombre: string
+  factor: number
+  hayEq: boolean
+  refMaxET: number | null
+  maxActual: number | null
+}) {
+  const [editando, setEditando] = useState(false)
+
+  return (
+    <div className="mx-5 rounded-2xl bg-orange-500/5 border border-orange-500/20 px-4 py-3 flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-orange-400">Equivalencia Fitness Park</p>
+          {hayEq ? (
+            <p className="text-xs text-zinc-300 mt-0.5">
+              100 kg Entrena-T ≈ <span className="font-bold text-white">{redondearPeso(aGimnasio(100, factor))} kg</span> aquí
+              <span className="text-zinc-500"> · factor {factor.toFixed(3)}</span>
+            </p>
+          ) : (
+            <p className="text-xs text-amber-400 mt-0.5">
+              Sin equivalencia: los kg se contarán igual que en Entrena-T.
+            </p>
+          )}
+        </div>
+        {!editando && (
+          <button
+            onClick={() => setEditando(true)}
+            className="shrink-0 rounded-xl bg-zinc-800 px-3 py-2 text-xs font-bold text-zinc-200 active:bg-zinc-700"
+          >
+            {hayEq ? 'Ajustar' : 'Definir'}
+          </button>
+        )}
+      </div>
+
+      {editando && (
+        <div className="pt-2 border-t border-orange-500/20">
+          <FormEquivalencia
+            nombre={nombre}
+            kgRefInicial={refMaxET}
+            kgGymInicial={maxActual ?? (refMaxET !== null && hayEq ? redondearPeso(aGimnasio(refMaxET, factor)) : null)}
+            onGuardado={() => setEditando(false)}
+            onCancelar={() => setEditando(false)}
+          />
+          {hayEq && (
+            <button
+              onClick={() => { setEquivalenciaSync(nombreCanonico(nombre), null); setEditando(false) }}
+              className="mt-2 w-full text-[11px] text-zinc-500 underline underline-offset-2 active:text-red-400"
+            >
+              Quitar equivalencia (contar los kg tal cual)
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Modal al guardar en Fitness Park sin equivalencia: propone la pareja referencia ↔ actual. */
+function ModalEquivalencia({
+  nombre, refMaxET, maxActual, onCerrar,
+}: {
+  nombre: string
+  refMaxET: number
+  maxActual: number
+  onCerrar: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/80 flex items-end sm:items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-3xl p-5 flex flex-col gap-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-orange-400">Fitness Park</p>
+          <h3 className="text-lg font-black text-white mt-1">¿Definir la equivalencia de {nombre}?</h3>
+          <p className="text-sm text-zinc-400 mt-1 leading-relaxed">
+            Tu último entreno en Entrena-T fue con <span className="text-white font-semibold">{refMaxET} kg</span> y aquí has hecho{' '}
+            <span className="text-white font-semibold">{maxActual} kg</span>. Si te ha costado lo mismo, guarda la pareja y a partir de ahora
+            la app convertirá los pesos de esta máquina automáticamente. Puedes ajustarla después.
+          </p>
+        </div>
+        <FormEquivalencia
+          nombre={nombre}
+          kgRefInicial={refMaxET}
+          kgGymInicial={maxActual}
+          onGuardado={onCerrar}
+          onCancelar={onCerrar}
+          textoGuardar="Guardar y continuar"
+        />
+        <p className="text-[11px] text-zinc-600 text-center -mt-1">Cancelar guarda el ejercicio sin equivalencia.</p>
       </div>
     </div>
   )
@@ -1563,6 +1813,7 @@ function pesoMax(series: Serie[]): number | null {
 
 function generarTextoWhatsApp(
   sesion: Sesion,
+  sesionRef: Sesion,
   diaNombre: string,
   totales: ReturnType<typeof calcularTotales>,
   historialPrevio: Sesion[],
@@ -1572,6 +1823,7 @@ function generarTextoWhatsApp(
   const historialOrdenado = [...historialPrevio].sort((a, b) => b.fecha.localeCompare(a.fecha))
   const lines: string[] = [
     `🏋️ Entreno del ${fecha} — ${diaNombre}`,
+    ...(sesion.gimnasio === 'fitnesspark' ? ['📍 Fitness Park (récords en kg equivalentes de Entrena-T)'] : []),
     '━━━━━━━━━━━━━━━━',
   ]
   const completados = sesion.ejercicios.filter((e) => e.completado && !e.saltado)
@@ -1600,7 +1852,9 @@ function generarTextoWhatsApp(
       return encontrado && encontrado.series.some(serieConDatos) ? encontrado : null
     }, null)
     const maxHist     = ultimoHist ? pesoMax(ultimoHist.series) : null
-    const maxActual   = pesoMax(ej.series)
+    // Récord: comparar en kg Entrena-T equivalentes (el listado muestra los kg reales)
+    const ejRef       = sesionRef.ejercicios[sesion.ejercicios.indexOf(ej)] ?? ej
+    const maxActual   = pesoMax(ejRef.series)
     const ejEsAsist   = isAsistencia(ejNombre)
     if (ultimoHist === null && maxActual !== null) {
       lines.push('  ⭐ ¡Primera vez!')
@@ -1733,7 +1987,10 @@ function ResumenSesion({
   const [modo,    setModo]    = useState<ModoResumen>('visual')
   const [copiado, setCopiado] = useState(false)
 
-  const completados = sesion.ejercicios.filter((e) => e.completado && !e.saltado)
+  const equivalencias = useFitLogStore(useShallow((s) => s.equivalencias))
+  // Sesión en kg Entrena-T equivalentes (progresos y récords se comparan en referencia)
+  const sesionRef   = useMemo(() => sesionAReferencia(sesion, equivalencias), [sesion, equivalencias])
+  const completados = sesionRef.ejercicios.filter((e) => e.completado && !e.saltado)
   const saltados    = sesion.ejercicios.filter((e) => e.saltado)
   const totales     = calcularTotales(sesion.ejercicios)
   const fecha       = formatFechaCorta(sesion.fecha)
@@ -1758,7 +2015,7 @@ function ResumenSesion({
   }, [])
 
   const handleCopiar = async () => {
-    const texto = generarTextoWhatsApp(sesion, diaNombre, totales, historialPrevio, progresos)
+    const texto = generarTextoWhatsApp(sesion, sesionRef, diaNombre, totales, historialPrevio, progresos)
     try {
       await navigator.clipboard.writeText(texto)
       setCopiado(true)
@@ -1965,7 +2222,7 @@ function ResumenSesion({
               Vista previa
             </p>
             <pre className="text-xs text-zinc-300 leading-relaxed whitespace-pre-wrap break-words font-mono">
-              {generarTextoWhatsApp(sesion, diaNombre, totales, historialPrevio, progresos)}
+              {generarTextoWhatsApp(sesion, sesionRef, diaNombre, totales, historialPrevio, progresos)}
             </pre>
           </div>
         )}

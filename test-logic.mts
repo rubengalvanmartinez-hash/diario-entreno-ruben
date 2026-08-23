@@ -3,6 +3,8 @@ import { normalizarNombre, nombreCanonico, matchesEjercicio } from './src/utils/
 import { serieConDatos } from './src/types/models'
 import { DEFAULT_EJERCICIOS, esConfigPorDefecto } from './src/store/defaultData'
 import { grupoDeEjercicio } from './src/utils/gruposMusculares'
+import { factorEquivalencia, tieneEquivalencia, aReferencia, aGimnasio, factorDesdePareja, redondearPeso, sesionAReferencia, historialAReferencia } from './src/utils/equivalencias'
+import type { Sesion } from './src/types/models'
 
 let fallos = 0
 function check(desc: string, cond: boolean) {
@@ -87,6 +89,32 @@ const esperado: Record<string, string> = {
 for (const [nombre, grupo] of Object.entries(esperado)) {
   check(`grupo '${nombre}' → ${grupo} (obtenido: ${grupoDeEjercicio(nombre)})`, grupoDeEjercicio(nombre) === grupo)
 }
+
+// ── Equivalencias entre gimnasios ────────────────────────────────────────────
+const eq = { 'jalon al pecho': 1.25 }  // 100 kg ET = 80 kg FP
+check('factor ET siempre 1', factorEquivalencia(eq, 'Jalón al pecho', 'entrenat') === 1)
+check('factor sin gimnasio = 1', factorEquivalencia(eq, 'Jalón al pecho', undefined) === 1)
+check('factor FP con equivalencia = 1.25', factorEquivalencia(eq, 'Jalón al pecho', 'fitnesspark') === 1.25)
+check('factor FP sin equivalencia = 1 (peso libre)', factorEquivalencia(eq, 'Press de pecho', 'fitnesspark') === 1)
+check('factor FP casa por alias (Jalon al pecho sin tilde)', factorEquivalencia(eq, 'Jalon al pecho', 'fitnesspark') === 1.25)
+check('tieneEquivalencia', tieneEquivalencia(eq, 'Jalón al pecho', 'fitnesspark') && !tieneEquivalencia(eq, 'Press de pecho', 'fitnesspark') && !tieneEquivalencia(eq, 'Jalón al pecho', 'entrenat'))
+check('80 kg FP → 100 kg ET', aReferencia(80, 1.25) === 100)
+check('110 kg ET → 88 kg FP', aGimnasio(110, 1.25) === 88)
+check('90 kg FP → 112.5 kg ET', aReferencia(90, 1.25) === 112.5)
+check('factorDesdePareja(100, 80) = 1.25', factorDesdePareja(100, 80) === 1.25)
+check('factorDesdePareja inválido → null', factorDesdePareja(0, 80) === null && factorDesdePareja(100, NaN) === null)
+check('redondearPeso a 0.5', redondearPeso(63.7) === 63.5 && redondearPeso(64.26) === 64.5)
+const sET: Sesion = { id: 'et', fecha: '2026-08-20', dia: 1, tipo: 'normal', sincronizado: true, ejercicios: [{ ejercicioId: 'a', nombreSnapshot: 'Jalón al pecho', completado: true, notaSesion: '', series: [{ numero: 1, reps: 12, pesoKg: 80 }] }] }
+const sFP: Sesion = { ...sET, id: 'fp', gimnasio: 'fitnesspark', ejercicios: [{ ejercicioId: 'b', nombreSnapshot: 'Jalón al pecho', completado: true, notaSesion: '', series: [{ numero: 1, reps: 12, pesoKg: 60 }, { numero: 2, reps: '', pesoKg: '' }] }, { ejercicioId: 'c', nombreSnapshot: 'Press de pecho', completado: true, notaSesion: '', series: [{ numero: 1, reps: 10, pesoKg: 50 }] }] }
+check('sesión ET no se toca (misma instancia)', sesionAReferencia(sET, eq) === sET)
+const sFPref = sesionAReferencia(sFP, eq)
+check('sesión FP: Jalón 60 → 75 kg ET', sFPref.ejercicios[0].series[0].pesoKg === 75)
+check('sesión FP: serie vacía sigue vacía', sFPref.ejercicios[0].series[1].pesoKg === '')
+check('sesión FP: Press de pecho sin equivalencia queda en 50', sFPref.ejercicios[1].series[0].pesoKg === 50)
+check('sesión FP: el gimnasio se conserva', sFPref.gimnasio === 'fitnesspark')
+check('historial sin nada que convertir → misma instancia', historialAReferencia([sET], eq) === [sET][0] ? true : historialAReferencia([sET], {})[0] === sET)
+check('historial FP sin equivalencias → misma instancia', (() => { const h = [sFP]; return historialAReferencia(h, {}) === h })())
+check('historial con FP convertido', historialAReferencia([sET, sFP], eq)[1].ejercicios[0].series[0].pesoKg === 75)
 
 console.log(fallos === 0 ? '\nTODOS LOS TESTS PASAN' : `\n${fallos} TESTS FALLAN`)
 process.exit(fallos === 0 ? 0 : 1)
