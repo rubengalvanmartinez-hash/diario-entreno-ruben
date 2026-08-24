@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.6.0'
+export const APP_VERSION = '2.6.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.6.1',
+    fecha: '24/08/2026',
+    tipo: 'media',
+    cambios: [
+      'Volumen semanal: al tocar una semana del gráfico, las barras por grupo de arriba (y el total de la cabecera) cambian a ESA semana — antes se quedaban en la semana actual, que un lunes va a cero y parecía vacío',
+      'Progresión: regla de regresión rehecha — se compara la tendencia RECIENTE (media suavizada de las últimas 3 sesiones) con la previa (las 3 anteriores), nunca contra picos antiguos de la ventana',
+      'Recuperarse de un bajón cuenta como Progresando (subida >3 %); Regresión solo si estás cayendo AHORA (>7 %); estar plano bajo un máximo antiguo es Estancado',
+      'Con los datos reales: de 5 regresiones falsas a 0 — Abductores (81→104→107) y Pecho inclinado (28→35) pasan a Progresando; los 10 estancados (Remo en 147, Jalón en 112…) son reales y el aviso de descarga se mantiene',
+    ],
+  },
   {
     version: '2.6.0',
     fecha: '24/08/2026',

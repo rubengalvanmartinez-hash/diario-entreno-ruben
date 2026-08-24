@@ -20,7 +20,8 @@ export default function VolumenSemanalCard() {
   const [semanaSel, setSemanaSel] = useState<number | null>(null)
 
   const semanas = useMemo(() => calcularVolumenSemanal(historial, NUM_SEMANAS), [historial])
-  const actual  = semanas[semanas.length - 1]
+  // Las filas de grupo muestran la semana seleccionada en el gráfico (por defecto, la actual)
+  const mostrada = semanas[semanaSel ?? semanas.length - 1]
 
   // Grupos con actividad en la ventana (orden de vista fijo)
   const grupos = useMemo(
@@ -43,21 +44,21 @@ export default function VolumenSemanalCard() {
         <div className="min-w-0">
           <p className="text-sm font-bold text-white">Volumen semanal</p>
           <p className="text-[11px] text-zinc-500">
-            Series por grupo · esta semana ({actual.label}) · banda objetivo {OBJETIVO_SERIES_MIN}–{OBJETIVO_SERIES_MAX}
+            Series por grupo · {mostrada.esActual ? 'esta semana' : 'semana'} ({mostrada.label}) · objetivo {OBJETIVO_SERIES_MIN}–{OBJETIVO_SERIES_MAX}
           </p>
         </div>
         <span className="ml-auto text-right shrink-0">
-          <span className="block text-xl font-black text-white tabular-nums leading-none">{actual.totalSeries}</span>
+          <span className="block text-xl font-black text-white tabular-nums leading-none">{mostrada.totalSeries}</span>
           <span className="block text-[10px] text-zinc-500">series</span>
         </span>
       </div>
 
-      {/* Filas por grupo (leyenda + semana actual) */}
+      {/* Filas por grupo (leyenda + semana mostrada) */}
       <div className="px-4 pt-2 flex flex-col">
         {grupos.map((g) => {
-          const series = actual.porGrupo[g.id]?.series ?? 0
+          const series = mostrada.porGrupo[g.id]?.series ?? 0
           const activo = grupoSel === g.id
-          const escala = Math.max(OBJETIVO_SERIES_MAX + 4, ...grupos.map((x) => actual.porGrupo[x.id]?.series ?? 0))
+          const escala = Math.max(OBJETIVO_SERIES_MAX + 4, ...grupos.map((x) => mostrada.porGrupo[x.id]?.series ?? 0))
           const pct    = (n: number) => `${(n / escala) * 100}%`
           return (
             <button

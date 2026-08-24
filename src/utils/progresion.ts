@@ -5,11 +5,14 @@
  * referencia Entrena-T) se toma una métrica por sesión:
  *  - 1RM estimado (Epley) si el ejercicio se hace con peso,
  *  - repeticiones máximas si es a peso corporal (peso 0 siempre).
- * y sobre las últimas sesiones se clasifica:
- *  - progresando: la última sesión marcó (o igualó) su mejor registro
- *  - estable:     sin mejorar pero cerca del mejor
- *  - estancado:   ≥ UMBRAL_ESTANCADO sesiones sin superar el mejor
- *  - regresion:   la media de las últimas 3 cae > 7 % por debajo del mejor
+ * y sobre las últimas sesiones (suavizadas por mediana de 3) se clasifica
+ * comparando la TENDENCIA RECIENTE (media de las últimas 3) con la PREVIA
+ * (las 3 anteriores) — nunca contra picos antiguos ni datos sueltos:
+ *  - progresando: récord en la última sesión, nuevo mejor suavizado o
+ *                 tendencia al alza (> +3 %)
+ *  - regresion:   tendencia a la baja (> −7 %) AHORA
+ *  - estancado:   ≥ UMBRAL_ESTANCADO sesiones sin superar su tope
+ *  - estable:     el resto
  * Deload: ≥ UMBRAL_DELOAD ejercicios estancados/en regresión entrenados en los
  * últimos 21 días → sugerir semana de descarga.
  */
@@ -41,7 +44,10 @@ export interface AnalisisEjercicio {
 export const VENTANA = 10
 export const MIN_SESIONES = 4
 export const UMBRAL_ESTANCADO = 4
+/** Regresión: la media reciente cae >7 % respecto a la previa */
 export const UMBRAL_REGRESION = 0.93
+/** Progreso por tendencia: la media reciente sube >3 % respecto a la previa */
+export const UMBRAL_SUBIDA = 1.03
 export const UMBRAL_DELOAD = 3
 export const DIAS_ACTIVO = 21
 /** Solo se listan ejercicios entrenados en los últimos N días (los abandonados no están "estancados") */
@@ -125,7 +131,15 @@ export function analizarProgresion(
     const sesionesSinMejoraSuav = suaves.length - 1 - idxUltimoMejor
     const mejor = Math.max(...suaves)
     const ultimo = valores[valores.length - 1]
-    const media3 = suaves.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, suaves.length)
+
+    // Tendencia: media de las últimas 3 suavizadas vs media de las 3 anteriores.
+    // Comparar contra la trayectoria RECIENTE, nunca contra un pico antiguo:
+    // recuperarse de un bajón es progresar, y estar plano bajo un máximo de
+    // hace meses es estar estancado, no en regresión.
+    const media = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
+    const reciente = media(suaves.slice(-3))
+    const anteriores = suaves.slice(0, -3).slice(-3)
+    const previa = anteriores.length >= 2 ? media(anteriores) : null
 
     // Un récord BRUTO en la última sesión siempre cuenta como progreso inmediato
     // (el suavizado tardaría una sesión más en reflejarlo)
@@ -133,7 +147,8 @@ export function analizarProgresion(
 
     let estado: EstadoProgresion
     if (prReciente || sesionesSinMejoraSuav === 0) estado = 'progresando'
-    else if (media3 < UMBRAL_REGRESION * mejor) estado = 'regresion'
+    else if (previa !== null && reciente >= UMBRAL_SUBIDA * previa) estado = 'progresando'
+    else if (previa !== null && reciente <= UMBRAL_REGRESION * previa) estado = 'regresion'
     else if (sesionesSinMejoraSuav >= UMBRAL_ESTANCADO) estado = 'estancado'
     else estado = 'estable'
     const sesionesSinMejora = estado === 'progresando' ? 0 : sesionesSinMejoraSuav
