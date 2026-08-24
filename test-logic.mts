@@ -5,6 +5,8 @@ import { DEFAULT_EJERCICIOS, esConfigPorDefecto } from './src/store/defaultData'
 import { grupoDeEjercicio } from './src/utils/gruposMusculares'
 import { factorEquivalencia, tieneEquivalencia, aReferencia, aGimnasio, factorDesdePareja, redondearPeso, sesionAReferencia, historialAReferencia } from './src/utils/equivalencias'
 import type { Sesion } from './src/types/models'
+import { calcularVolumenSemanal, lunesDe } from './src/utils/volumenSemanal'
+import { analizarProgresion, evaluarDeload } from './src/utils/progresion'
 
 let fallos = 0
 function check(desc: string, cond: boolean) {
@@ -115,6 +117,40 @@ check('sesión FP: el gimnasio se conserva', sFPref.gimnasio === 'fitnesspark')
 check('historial sin nada que convertir → misma instancia', historialAReferencia([sET], eq) === [sET][0] ? true : historialAReferencia([sET], {})[0] === sET)
 check('historial FP sin equivalencias → misma instancia', (() => { const h = [sFP]; return historialAReferencia(h, {}) === h })())
 check('historial con FP convertido', historialAReferencia([sET, sFP], eq)[1].ejercicios[0].series[0].pesoKg === 75)
+
+// ── Volumen semanal por grupo ────────────────────────────────────────────────
+check('lunesDe domingo 2026-08-23 → 2026-08-17', lunesDe('2026-08-23') === '2026-08-17')
+check('lunesDe lunes 2026-08-17 → sí mismo', lunesDe('2026-08-17') === '2026-08-17')
+const mkSes = (id: string, fecha: string, ejercicios: [string, number, number, number][]): Sesion => ({ id, fecha, dia: 1, tipo: 'normal', sincronizado: true, ejercicios: ejercicios.map(([nombre, series, reps, kg], i) => ({ ejercicioId: id + '-' + i, nombreSnapshot: nombre, completado: true, notaSesion: '', series: Array.from({ length: series }, (_, n) => ({ numero: n + 1, reps, pesoKg: kg })) })) })
+const histVol = [ mkSes('v1', '2026-08-18', [['Press de pecho', 4, 10, 60], ['Jalón al pecho', 3, 12, 80]]), mkSes('v2', '2026-08-20', [['Press militar', 3, 10, 20], ['Dominadas', 3, 7, 0]]), mkSes('v3', '2026-08-11', [['Press de pecho', 5, 10, 55]]) ]
+const semanas = calcularVolumenSemanal(histVol, 2, '2026-08-23')
+check('2 semanas, la última es la actual', semanas.length === 2 && semanas[1].esActual && semanas[1].inicio === '2026-08-17')
+check('semana actual: pecho 4 series', semanas[1].porGrupo.pecho?.series === 4)
+check('semana actual: espalda 3 (jalón) + 3 (dominadas) = 6', semanas[1].porGrupo.espalda?.series === 6)
+check('semana actual: hombro 3 series', semanas[1].porGrupo.hombro?.series === 3)
+check('semana actual: total 13', semanas[1].totalSeries === 13)
+check('semana anterior: pecho 5', semanas[0].porGrupo.pecho?.series === 5 && semanas[0].totalSeries === 5)
+check('tonelaje pecho actual = 4×10×60', semanas[1].porGrupo.pecho?.tonelaje === 2400)
+check('label semana', semanas[1].label === '17–23 ago')
+
+// ── Progresión / estancamiento ───────────────────────────────────────────────
+const sesionesDe = (nombre: string, datos: [string, number, number][]): Sesion[] => datos.map(([fecha, reps, kg], i) => mkSes(nombre + i, fecha, [[nombre, 3, reps, kg]]))
+const histProg = [ ...sesionesDe('Press banca', [['2026-07-01', 10, 60], ['2026-07-08', 10, 62.5], ['2026-07-15', 10, 65], ['2026-08-20', 10, 67.5]]), ...sesionesDe('Remo', [['2026-07-01', 10, 60], ['2026-07-22', 10, 60], ['2026-08-05', 10, 60], ['2026-08-12', 10, 60], ['2026-08-19', 10, 60]]), ...sesionesDe('Curl', [['2026-07-01', 10, 30], ['2026-07-08', 10, 30], ['2026-08-05', 10, 26], ['2026-08-12', 10, 26], ['2026-08-19', 10, 26]]), ...sesionesDe('Dominadas', [['2026-07-01', 6, 0], ['2026-07-08', 7, 0], ['2026-08-12', 8, 0], ['2026-08-19', 9, 0]]), ...sesionesDe('Prensa', [['2026-07-01', 10, 100], ['2026-08-19', 10, 105]]) ]
+const analisis = analizarProgresion(histProg, '2026-08-23')
+const por = (n: string) => analisis.find((a) => a.nombre === n)
+check('Press banca progresando (último = mejor)', por('Press banca')?.estado === 'progresando')
+check('Remo estancado (4 sesiones sin mejorar)', por('Remo')?.estado === 'estancado' && por('Remo')?.sesionesSinMejora === 4)
+check('Curl en regresión (media3 < 93% del mejor)', por('Curl')?.estado === 'regresion')
+check('Dominadas usa métrica reps y progresa', por('Dominadas')?.metrica === 'reps' && por('Dominadas')?.estado === 'progresando')
+check('Prensa fuera (solo 2 sesiones)', por('Prensa') === undefined)
+check('orden: regresión antes que estancado', analisis[0].estado === 'regresion' && analisis[1].estado === 'estancado')
+const deload1 = evaluarDeload(analisis, '2026-08-23')
+check('deload NO con 2 afectados', deload1.sugerir === false && deload1.afectados.length === 2)
+const histProg2 = [...histProg, ...sesionesDe('Militar', [['2026-07-01', 10, 40], ['2026-07-22', 10, 40], ['2026-08-05', 10, 40], ['2026-08-12', 10, 40], ['2026-08-19', 10, 40]])]
+const deload2 = evaluarDeload(analizarProgresion(histProg2, '2026-08-23'), '2026-08-23')
+check('deload SÍ con 3 afectados recientes', deload2.sugerir === true && deload2.afectados.length === 3)
+const deload3 = evaluarDeload(analizarProgresion(histProg2, '2026-10-01'), '2026-10-01')
+check('deload NO si hace >21 días que no se entrenan', deload3.sugerir === false)
 
 console.log(fallos === 0 ? '\nTODOS LOS TESTS PASAN' : `\n${fallos} TESTS FALLAN`)
 process.exit(fallos === 0 ? 0 : 1)

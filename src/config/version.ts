@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.5.0'
+export const APP_VERSION = '2.6.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,20 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.6.0',
+    fecha: '24/08/2026',
+    tipo: 'mayor',
+    cambios: [
+      'TENDENCIAS · VOLUMEN SEMANAL: nueva tarjeta con las series de la semana por grupo muscular (barra por grupo con banda objetivo 10–20 series/semana) y gráfico apilado de las últimas 8 semanas con los colores de cada grupo',
+      'Tocar un grupo lo aísla en el gráfico (con las líneas de la banda objetivo); tocar una semana muestra su detalle (total y reparto por grupos)',
+      'TENDENCIAS · PROGRESIÓN: cada ejercicio activo se clasifica en Progresando / Estable / Estancado / Regresión a partir del 1RM estimado (o reps si es a peso corporal) de sus últimas 10 sesiones, con mini-gráfica por ejercicio y filtros por estado',
+      'AVISO DE DESCARGA: si ≥3 ejercicios recientes llevan varias sesiones sin mejorar o cayendo, la app sugiere una semana de deload con los ejercicios afectados',
+      'Métrica robusta afinada con los datos reales: suavizado por mediana de 3 (un valor atípico de un día no fabrica regresiones), un récord en la última sesión cuenta como progreso inmediato, ejercicios sin entrenar 45 días no se listan y los ejercicios ahora a peso corporal (Dominadas) se miden por repeticiones',
+      'Todo en kg Entrena-T equivalentes (respeta las equivalencias de gimnasio); colores validados para el tema oscuro (contraste ≥3:1 y separación para daltonismo), identidad de grupo siempre con icono + nombre',
+      'Tests: 24 casos nuevos (volumen semanal, estados de progresión, deload, fechas locales) y verificación con las 206 sesiones reales',
+    ],
+  },
   {
     version: '2.5.0',
     fecha: '23/08/2026',
