@@ -2106,6 +2106,9 @@ function ResumenSesion({
   syncError?: string | null
 }) {
   const [modo,    setModo]    = useState<ModoResumen>('visual')
+
+  // Siempre arrancar en Visual al abrir el resumen (aunque se reutilice el componente)
+  useEffect(() => { setModo('visual') }, [sesion.id])
   const [copiado, setCopiado] = useState(false)
 
   const equivalencias = useFitLogStore(useShallow((s) => s.equivalencias))

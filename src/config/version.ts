@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.6.3'
+export const APP_VERSION = '2.6.4'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,16 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.6.4',
+    fecha: '24/08/2026',
+    tipo: 'menor',
+    cambios: [
+      'Eliminadas las mini barras de scroll con flechas que aparecían pegadas a los números grandes ("3d" de Inicio, tarjetas de Tendencias…): una regla global de index.html ponía overflow-x hidden en TODOS los elementos, lo que convierte el eje vertical en auto y Windows pintaba una barra en cualquier texto recortado 1 px',
+      'La protección contra desplazamiento horizontal de la página se mantiene (body) y el bloqueo de gestos táctiles también (touch-action)',
+      'El resumen de sesión arranca siempre en modo Visual',
+    ],
+  },
   {
     version: '2.6.3',
     fecha: '24/08/2026',
