@@ -1754,6 +1754,10 @@ interface ProgresoEjercicio {
   pesoTopAnterior: number | null
   /** true si hoy la mejor serie lleva MÁS peso (o MENOS asistencia) que el último entreno */
   escalonNuevo: boolean
+  /** Fuerza de las sesiones anteriores (cronológico: la más antigua primero, máx. 4) */
+  fuerzaPrevias: number[]
+  /** Media de la fuerza de las sesiones anteriores (hasta 4) */
+  fuerzaMedia: number | null
   volActual: number
   volAnterior: number | null
   veredicto: 'escalon' | 'sube' | 'igual' | 'baja'
@@ -1793,29 +1797,42 @@ function calcularProgresos(
     const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
     const esAsist = isAsistencia(nombre)
 
-    // Último entreno previo con datos de este ejercicio
-    let seriesPrev: Serie[] | null = null
+    // Hasta 4 entrenos previos con datos de este ejercicio (más reciente primero)
+    const previas: Serie[][] = []
     for (const ses of historialOrdenado) {
       if (ses.id === sesionActualId) continue
       const ejPrev = ses.ejercicios.find(
         (e) => matchesEjercicio(e, ej.ejercicioId, nombre) && e.completado && !e.saltado,
       )
-      if (ejPrev && ejPrev.series.some(serieConDatos)) { seriesPrev = ejPrev.series; break }
+      if (ejPrev && ejPrev.series.some(serieConDatos)) {
+        previas.push(ejPrev.series)
+        if (previas.length >= 4) break
+      }
     }
-    if (!seriesPrev) continue // primera vez: ya lo celebra el listado con ⭐
+    if (previas.length === 0) continue // primera vez: ya lo celebra el listado con ⭐
 
+    const seriesPrev = previas[0]
     const prev = fuerzaDe(seriesPrev)
     if (prev.valor <= 0) continue
 
     // Si hoy es a peso corporal y antes con peso (o viceversa), comparar en reps
+    const repsMax = (series: Serie[]) => Math.max(0, ...series.filter((x) => x.reps !== '' && Number(x.reps) > 0).map((x) => Number(x.reps)))
     let fuerzaHoy = hoy.valor, fuerzaAnterior = prev.valor, metrica = hoy.metrica
     if (hoy.metrica !== prev.metrica) {
-      const repsMax = (series: Serie[]) => Math.max(0, ...series.filter((s) => s.reps !== '' && Number(s.reps) > 0).map((s) => Number(s.reps)))
       metrica = 'reps'
       fuerzaHoy = repsMax(ej.series)
       fuerzaAnterior = repsMax(seriesPrev)
       if (fuerzaHoy <= 0 || fuerzaAnterior <= 0) continue
     }
+
+    // Fuerza de cada sesión previa con la MISMA métrica (cronológico)
+    const fuerzaPrevias = previas
+      .map((sp) => (metrica === 'reps' ? repsMax(sp) : fuerzaDe(sp).metrica === 'e1rm' ? fuerzaDe(sp).valor : 0))
+      .filter((v) => v > 0)
+      .reverse()
+    const fuerzaMedia = fuerzaPrevias.length > 0
+      ? Math.round((fuerzaPrevias.reduce((a, b) => a + b, 0) / fuerzaPrevias.length) * 10) / 10
+      : null
 
     // Escalón: la mejor serie de hoy lleva más peso (o menos asistencia)
     const escalonNuevo =
@@ -1838,6 +1855,8 @@ function calcularProgresos(
       pesoTopHoy: hoy.pesoTop,
       pesoTopAnterior: prev.pesoTop,
       escalonNuevo,
+      fuerzaPrevias,
+      fuerzaMedia,
       volActual: calcularVolumen(ej.series),
       volAnterior: calcularVolumen(seriesPrev),
       veredicto,
@@ -1923,9 +1942,11 @@ function generarTextoWhatsApp(
     lines.push('📈 Progreso de hoy')
     for (const p of progresos) {
       const lin = lineaFuerza(p)
+      const med = lineaMedia(p)
       lines.push(`${p.nombre}`)
       if (p.veredicto === 'escalon') lines.push(`  ${textoEscalon(p)}`)
-      lines.push(`  ${lin.texto}`)
+      lines.push(p.veredicto === 'escalon' ? `  ${lin.texto}` : `  ${lin.texto} vs último`)
+      if (med) lines.push(`  ${med.texto}`)
       lines.push(`  ${textoVolumen(p)}`)
     }
   }
@@ -1966,6 +1987,25 @@ function lineaFuerza(p: ProgresoEjercicio): { texto: string; colorClass: string;
   }
 }
 
+/** Línea de fuerza vs la MEDIA de las sesiones anteriores (hasta 4). */
+function lineaMedia(p: ProgresoEjercicio): { texto: string; colorClass: string; mejora: boolean } | null {
+  if (p.fuerzaMedia === null || p.fuerzaPrevias.length < 2) return null
+  const u = p.metrica === 'e1rm' ? 'kg 1RM est.' : 'reps'
+  const n = p.fuerzaPrevias.length
+  const diff = p.fuerzaHoy - p.fuerzaMedia
+  const abs = Math.round(Math.abs(diff) * 10) / 10
+  const label = `vs media ${n} anteriores (${p.fuerzaMedia} ${u})`
+  if (Math.abs(diff) / p.fuerzaMedia <= TOLERANCIA_FUERZA) {
+    return { mejora: false, colorClass: 'text-zinc-400', texto: `= en tu media ${label}` }
+  }
+  if (diff > 0) return { mejora: true, colorClass: 'text-emerald-400', texto: `↑ +${abs} ${label}` }
+  return {
+    mejora: false,
+    colorClass: p.veredicto === 'escalon' ? 'text-zinc-400' : 'text-red-400',
+    texto: `↓ -${abs} ${label}${p.veredicto === 'escalon' ? ' · normal al subir de peso' : ''}`,
+  }
+}
+
 /** Línea de VOLUMEN (informativa, nunca decide el color). */
 function textoVolumen(p: ProgresoEjercicio): string {
   if (p.volAnterior === null || p.volActual <= 0) return `Volumen: ${fmtKg(p.volActual)} kg`
@@ -1973,6 +2013,25 @@ function textoVolumen(p: ProgresoEjercicio): string {
   const signo = diff > 0 ? '+' : diff < 0 ? '-' : '±'
   const nota = p.veredicto === 'escalon' && diff < 0 ? ' · normal al subir de escalón' : ''
   return `Volumen: ${fmtKg(p.volActual)} kg (${signo}${fmtKg(Math.abs(diff))}${nota})`
+}
+
+/** Mini-gráfica: fuerza de las sesiones anteriores + el punto de HOY destacado. */
+function MiniFuerza({ previas, hoy }: { previas: number[]; hoy: number }) {
+  const valores = [...previas, hoy]
+  if (valores.length < 3) return null
+  const W = 56, H = 20, PAD = 3
+  const min = Math.min(...valores)
+  const max = Math.max(...valores)
+  const rango = max - min || 1
+  const x = (i: number) => PAD + (i / (valores.length - 1)) * (W - PAD * 2)
+  const y = (v: number) => PAD + (1 - (v - min) / rango) * (H - PAD * 2)
+  const pts = valores.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden className="shrink-0">
+      <polyline points={pts} fill="none" stroke="#3987e5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={x(valores.length - 1)} cy={y(hoy)} r="2.4" fill="#ffffff" stroke="#18181b" strokeWidth="1.2" />
+    </svg>
+  )
 }
 
 function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
@@ -1990,12 +2049,16 @@ function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
       <div className="divide-y divide-zinc-800/60">
         {progresos.map((p, i) => {
           const lin = lineaFuerza(p)
+          const med = lineaMedia(p)
           return (
             <div key={i} className="px-4 py-3 flex flex-col gap-1">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-sm font-bold text-white leading-snug">{p.nombre}</span>
-                <span className="text-xs text-zinc-400 tabular-nums shrink-0 font-semibold">
-                  {p.fuerzaHoy} {p.metrica === 'e1rm' ? 'kg 1RM' : 'reps'}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-bold text-white leading-snug min-w-0 truncate">{p.nombre}</span>
+                <span className="flex items-center gap-2 shrink-0">
+                  <MiniFuerza previas={p.fuerzaPrevias} hoy={p.fuerzaHoy} />
+                  <span className="text-xs text-zinc-400 tabular-nums font-semibold">
+                    {p.fuerzaHoy} {p.metrica === 'e1rm' ? 'kg 1RM' : 'reps'}
+                  </span>
                 </span>
               </div>
               {p.veredicto === 'escalon' && (
@@ -2004,8 +2067,13 @@ function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
                 </span>
               )}
               <span className={`text-xs font-semibold ${lin.colorClass}`}>
-                {lin.texto}
+                {lin.texto}{p.veredicto !== 'escalon' && <span className="text-zinc-600 font-normal"> vs último</span>}
               </span>
+              {med && (
+                <span className={`text-xs font-semibold ${med.colorClass}`}>
+                  {med.texto}
+                </span>
+              )}
               <span className="text-[11px] text-zinc-500 tabular-nums">
                 {textoVolumen(p)}
               </span>

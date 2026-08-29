@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.6.2'
+export const APP_VERSION = '2.6.3'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.6.3',
+    fecha: '24/08/2026',
+    tipo: 'menor',
+    cambios: [
+      'Progreso de hoy: además de la comparación con el último entreno, vuelve la comparación con las ANTERIORES — fuerza de hoy vs la media de tus últimas 4 sesiones (verde/rojo con el mismo ±2 %)',
+      'Mini-gráfica por ejercicio en el resumen con la fuerza de las sesiones anteriores y el punto de hoy destacado: de un vistazo ves si vas bien o mal',
+      'El día del escalón, las dos comparaciones se complementan: "normal al subir de peso" vs el último y, si estás por encima de tu media, "↑ vs media 4 anteriores" en verde',
+      'La línea de media también va en el texto de WhatsApp',
+    ],
+  },
   {
     version: '2.6.2',
     fecha: '24/08/2026',
