@@ -1735,70 +1735,112 @@ function isAsistencia(nombre: string): boolean {
   return ASISTENCIA_NOMBRES.some((a) => n.includes(a))
 }
 
+/**
+ * Progreso de un ejercicio al acabar la sesión. El VEREDICTO lo decide la
+ * FUERZA (1RM estimado de la mejor serie; reps si es a peso corporal), que es
+ * indiferente al intercambio peso↔reps: 60×12 ≈ 65×8. Subir de peso con menos
+ * reps ya no sale en rojo — es un "escalón nuevo". El volumen queda como dato
+ * secundario y nunca decide el color.
+ */
 interface ProgresoEjercicio {
   nombre: string
-  volActual: number
-  /**
-   * Diferencia vs sesión anterior.
-   * null = sin sesión anterior.
-   * 0 = mismo volumen exacto.
-   * Siempre se muestra cuando hay datos (incluso si es 0).
-   */
-  diffAnterior: number | null
-  /**
-   * Diferencia vs media de las últimas 4 sesiones.
-   * null = sin sesiones anteriores.
-   */
-  diffMedia4: number | null
   esAsistencia: boolean
+  /** 'e1rm' con peso; 'reps' a peso corporal */
+  metrica: 'e1rm' | 'reps'
+  fuerzaHoy: number
+  fuerzaAnterior: number | null
+  /** Mejor peso de la mejor serie (para detectar el escalón) */
+  pesoTopHoy: number | null
+  pesoTopAnterior: number | null
+  /** true si hoy la mejor serie lleva MÁS peso (o MENOS asistencia) que el último entreno */
+  escalonNuevo: boolean
+  volActual: number
+  volAnterior: number | null
+  veredicto: 'escalon' | 'sube' | 'igual' | 'baja'
+}
+
+/** Tolerancia para considerar "misma fuerza" (±2 %) */
+const TOLERANCIA_FUERZA = 0.02
+
+function fuerzaDe(series: Serie[]): { valor: number; metrica: 'e1rm' | 'reps'; pesoTop: number | null } {
+  const validas = series.filter((s) => s.reps !== '' && Number(s.reps) > 0 && s.pesoKg !== '' && Number(s.pesoKg) >= 0)
+  const conPeso = validas.filter((s) => Number(s.pesoKg) > 0)
+  if (conPeso.length > 0) {
+    const e1rm = Math.max(...conPeso.map((s) => Number(s.pesoKg) * (Number(s.reps) <= 1 ? 1 : 1 + Number(s.reps) / 30)))
+    return { valor: Math.round(e1rm * 10) / 10, metrica: 'e1rm', pesoTop: Math.max(...conPeso.map((s) => Number(s.pesoKg))) }
+  }
+  if (validas.length > 0) {
+    return { valor: Math.max(...validas.map((s) => Number(s.reps))), metrica: 'reps', pesoTop: null }
+  }
+  return { valor: 0, metrica: 'e1rm', pesoTop: null }
 }
 
 /**
- * Para cada ejercicio completado, calcula el volumen y lo compara con
- * (a) la sesión anterior y (b) la media de las últimas 4.
- * sesionActualId se usa para EXCLUIR la sesión recién completada del historial
- * (puede estar ahí si el pull de Supabase la trajo antes de que se muestre el resumen).
+ * Para cada ejercicio completado, compara la FUERZA de hoy con la del último
+ * entreno con datos y detecta si se ha subido de escalón de peso.
+ * sesionActualId excluye la sesión recién completada del historial (puede
+ * estar ahí si el pull de Supabase la trajo antes de mostrar el resumen).
  */
-function calcularProgresosVolumen(
+function calcularProgresos(
   completados: SesionEjercicio[],
   historialOrdenado: Sesion[],
   sesionActualId: string,
 ): ProgresoEjercicio[] {
   const resultado: ProgresoEjercicio[] = []
   for (const ej of completados) {
-    const volActual = calcularVolumen(ej.series)
-    if (volActual <= 0) continue
+    const hoy = fuerzaDe(ej.series)
+    if (hoy.valor <= 0) continue
     const nombre = ej.nombreSustituido ?? ej.nombreSnapshot
+    const esAsist = isAsistencia(nombre)
 
-    // Hasta 4 sesiones previas con volumen > 0 — excluir la sesión actual
-    const volPrevios: number[] = []
+    // Último entreno previo con datos de este ejercicio
+    let seriesPrev: Serie[] | null = null
     for (const ses of historialOrdenado) {
-      if (ses.id === sesionActualId) continue   // ← excluir sesión recién completada
+      if (ses.id === sesionActualId) continue
       const ejPrev = ses.ejercicios.find(
         (e) => matchesEjercicio(e, ej.ejercicioId, nombre) && e.completado && !e.saltado,
       )
-      if (ejPrev) {
-        const v = calcularVolumen(ejPrev.series)
-        if (v > 0) volPrevios.push(v)
-        if (volPrevios.length >= 4) break
-      }
+      if (ejPrev && ejPrev.series.some(serieConDatos)) { seriesPrev = ejPrev.series; break }
     }
-    if (volPrevios.length === 0) continue
+    if (!seriesPrev) continue // primera vez: ya lo celebra el listado con ⭐
 
-    const rawAnterior = volActual - volPrevios[0]
-    const media4      = volPrevios.reduce((a, b) => a + b, 0) / volPrevios.length
-    const rawMedia4   = volActual - media4
+    const prev = fuerzaDe(seriesPrev)
+    if (prev.valor <= 0) continue
 
-    // Omitir solo si AMBAS comparaciones son idénticas (sin ningún cambio)
-    if (Math.abs(rawAnterior) < 0.01 && Math.abs(rawMedia4) < 0.01) continue
+    // Si hoy es a peso corporal y antes con peso (o viceversa), comparar en reps
+    let fuerzaHoy = hoy.valor, fuerzaAnterior = prev.valor, metrica = hoy.metrica
+    if (hoy.metrica !== prev.metrica) {
+      const repsMax = (series: Serie[]) => Math.max(0, ...series.filter((s) => s.reps !== '' && Number(s.reps) > 0).map((s) => Number(s.reps)))
+      metrica = 'reps'
+      fuerzaHoy = repsMax(ej.series)
+      fuerzaAnterior = repsMax(seriesPrev)
+      if (fuerzaHoy <= 0 || fuerzaAnterior <= 0) continue
+    }
 
-    // Almacenar siempre ambos valores — null solo si no hay datos históricos
+    // Escalón: la mejor serie de hoy lleva más peso (o menos asistencia)
+    const escalonNuevo =
+      hoy.pesoTop !== null && prev.pesoTop !== null &&
+      (esAsist ? hoy.pesoTop < prev.pesoTop : hoy.pesoTop > prev.pesoTop)
+
+    const ratio = fuerzaHoy / fuerzaAnterior
+    let veredicto: ProgresoEjercicio['veredicto']
+    if (escalonNuevo) veredicto = 'escalon'
+    else if (ratio > 1 + TOLERANCIA_FUERZA) veredicto = 'sube'
+    else if (ratio < 1 - TOLERANCIA_FUERZA) veredicto = 'baja'
+    else veredicto = 'igual'
+
     resultado.push({
       nombre,
-      volActual,
-      diffAnterior: rawAnterior,   // siempre presente (puede ser 0)
-      diffMedia4:   rawMedia4,     // siempre presente (puede ser 0)
-      esAsistencia: isAsistencia(nombre),
+      esAsistencia: esAsist,
+      metrica,
+      fuerzaHoy,
+      fuerzaAnterior,
+      pesoTopHoy: hoy.pesoTop,
+      pesoTopAnterior: prev.pesoTop,
+      escalonNuevo,
+      volActual: calcularVolumen(ej.series),
+      volAnterior: calcularVolumen(seriesPrev),
+      veredicto,
     })
   }
   return resultado
@@ -1875,15 +1917,16 @@ function generarTextoWhatsApp(
   )
   lines.push('💪 ¡Gran sesión!')
 
-  // Sección progreso de volumen (solo si hay cambios)
+  // Sección progreso (la fuerza manda; el volumen es secundario)
   if (progresos.length > 0) {
     lines.push('')
     lines.push('📈 Progreso de hoy')
     for (const p of progresos) {
-      lines.push(`${p.nombre} (${fmtKg(p.volActual)} kg vol.)`)
-      // Siempre mostrar ambas líneas cuando hay datos
-      lines.push(`  ${lineaProgreso(p.diffAnterior ?? 0, p.esAsistencia, 'anterior').texto}`)
-      lines.push(`  ${lineaProgreso(p.diffMedia4   ?? 0, p.esAsistencia, 'media4').texto}`)
+      const lin = lineaFuerza(p)
+      lines.push(`${p.nombre}`)
+      if (p.veredicto === 'escalon') lines.push(`  ${textoEscalon(p)}`)
+      lines.push(`  ${lin.texto}`)
+      lines.push(`  ${textoVolumen(p)}`)
     }
   }
 
@@ -1892,69 +1935,79 @@ function generarTextoWhatsApp(
 
 // ── SeccionProgresoHoy ────────────────────────────────────────────────────────
 
-/** Para una línea de progreso: determina si es mejora, texto y clase de color. */
-function lineaProgreso(
-  diff: number,
-  esAsistencia: boolean,
-  tipo: 'anterior' | 'media4',
-): { mejoró: boolean; texto: string; colorClass: string } {
-  const label = tipo === 'anterior' ? 'vs sesión anterior' : 'vs media 4 sesiones'
-  const abs   = Math.abs(diff)
+/** Texto del escalón nuevo (más peso, o menos asistencia). */
+function textoEscalon(p: ProgresoEjercicio): string {
+  if (p.esAsistencia) return `⬆️ Menos asistencia: ${fmtKg(p.pesoTopAnterior!)} → ${fmtKg(p.pesoTopHoy!)} kg 💪`
+  return `⬆️ ¡Nuevo escalón!: ${fmtKg(p.pesoTopAnterior!)} → ${fmtKg(p.pesoTopHoy!)} kg`
+}
 
-  // Caso "igual" (≤ 0.01 kg de diferencia)
-  if (abs < 0.01) {
-    return { mejoró: false, colorClass: 'text-zinc-500', texto: `= mismo volumen ${label}` }
-  }
-
-  if (esAsistencia) {
-    const mejoró = diff < 0
+/** Línea de FUERZA (decide el color). En un escalón nuevo, mantenerse es lo esperado. */
+function lineaFuerza(p: ProgresoEjercicio): { texto: string; colorClass: string; mejora: boolean } {
+  const u = p.metrica === 'e1rm' ? 'kg 1RM est.' : 'reps'
+  const diff = p.fuerzaHoy - (p.fuerzaAnterior ?? p.fuerzaHoy)
+  const abs = Math.round(Math.abs(diff) * 10) / 10
+  const igual = p.fuerzaAnterior !== null && Math.abs(diff) / p.fuerzaAnterior <= TOLERANCIA_FUERZA
+  if (igual) {
     return {
-      mejoró,
-      colorClass: mejoró ? 'text-emerald-400' : 'text-red-400',
-      texto: mejoró
-        ? `↓ -${fmtKg(abs)} kg de asistencia ${label} (menos ayuda 💪)`
-        : `↑ +${fmtKg(abs)} kg de asistencia ${label}`,
+      mejora: p.veredicto === 'escalon',
+      colorClass: p.veredicto === 'escalon' ? 'text-emerald-400' : 'text-zinc-400',
+      texto: p.veredicto === 'escalon'
+        ? `= misma fuerza (${p.fuerzaHoy} ${u}) — perfecto al cambiar de peso`
+        : `= misma fuerza (${p.fuerzaHoy} ${u})`,
     }
   }
-
-  const mejoró = diff > 0
+  if (diff > 0) return { mejora: true, colorClass: 'text-emerald-400', texto: `↑ fuerza +${abs} ${u} (${p.fuerzaAnterior} → ${p.fuerzaHoy})` }
   return {
-    mejoró,
-    colorClass: mejoró ? 'text-emerald-400' : 'text-red-400',
-    texto: mejoró ? `↑ +${fmtKg(abs)} kg ${label}` : `↓ -${fmtKg(abs)} kg ${label}`,
+    mejora: false,
+    colorClass: p.veredicto === 'escalon' ? 'text-zinc-400' : 'text-red-400',
+    texto: p.veredicto === 'escalon'
+      ? `fuerza ${p.fuerzaAnterior} → ${p.fuerzaHoy} ${u} — normal al subir de peso, ya la recuperarás`
+      : `↓ fuerza -${abs} ${u} (${p.fuerzaAnterior} → ${p.fuerzaHoy})`,
   }
+}
+
+/** Línea de VOLUMEN (informativa, nunca decide el color). */
+function textoVolumen(p: ProgresoEjercicio): string {
+  if (p.volAnterior === null || p.volActual <= 0) return `Volumen: ${fmtKg(p.volActual)} kg`
+  const diff = p.volActual - p.volAnterior
+  const signo = diff > 0 ? '+' : diff < 0 ? '-' : '±'
+  const nota = p.veredicto === 'escalon' && diff < 0 ? ' · normal al subir de escalón' : ''
+  return `Volumen: ${fmtKg(p.volActual)} kg (${signo}${fmtKg(Math.abs(diff))}${nota})`
 }
 
 function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
   if (progresos.length === 0) return null
 
-  const hayMejora = progresos.some((p) =>
-    (p.diffAnterior !== null && lineaProgreso(p.diffAnterior, p.esAsistencia, 'anterior').mejoró) ||
-    (p.diffMedia4   !== null && lineaProgreso(p.diffMedia4,   p.esAsistencia, 'media4').mejoró),
-  )
+  const hayMejora = progresos.some((p) => p.veredicto === 'escalon' || p.veredicto === 'sube' || lineaFuerza(p).mejora)
 
   return (
     <div className="bg-zinc-900 border border-zinc-700 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300 mb-4">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
         <span className="text-base select-none">📈</span>
         <h3 className="font-bold text-white text-sm">Progreso de hoy</h3>
+        <span className="ml-auto text-[10px] text-zinc-600">fuerza = 1RM estimado</span>
       </div>
       <div className="divide-y divide-zinc-800/60">
         {progresos.map((p, i) => {
-          // Ambas líneas siempre presentes cuando hay datos históricos
-          const linAnterior = lineaProgreso(p.diffAnterior ?? 0, p.esAsistencia, 'anterior')
-          const linMedia4   = lineaProgreso(p.diffMedia4   ?? 0, p.esAsistencia, 'media4')
+          const lin = lineaFuerza(p)
           return (
             <div key={i} className="px-4 py-3 flex flex-col gap-1">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-bold text-white leading-snug">{p.nombre}</span>
-                <span className="text-xs text-zinc-500 tabular-nums shrink-0">{fmtKg(p.volActual)} kg vol.</span>
+                <span className="text-xs text-zinc-400 tabular-nums shrink-0 font-semibold">
+                  {p.fuerzaHoy} {p.metrica === 'e1rm' ? 'kg 1RM' : 'reps'}
+                </span>
               </div>
-              <span className={`text-xs font-semibold ${linAnterior.colorClass}`}>
-                {linAnterior.texto}
+              {p.veredicto === 'escalon' && (
+                <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 rounded-lg px-2 py-1 self-start">
+                  {textoEscalon(p)}
+                </span>
+              )}
+              <span className={`text-xs font-semibold ${lin.colorClass}`}>
+                {lin.texto}
               </span>
-              <span className={`text-xs font-semibold ${linMedia4.colorClass}`}>
-                {linMedia4.texto}
+              <span className="text-[11px] text-zinc-500 tabular-nums">
+                {textoVolumen(p)}
               </span>
             </div>
           )
@@ -2001,7 +2054,7 @@ function ResumenSesion({
   )
 
   const progresos = useMemo(
-    () => calcularProgresosVolumen(completados, historialOrdenado, sesion.id),
+    () => calcularProgresos(completados, historialOrdenado, sesion.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sesion.id, historialPrevio],
   )

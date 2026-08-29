@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.6.1'
+export const APP_VERSION = '2.6.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.6.2',
+    fecha: '24/08/2026',
+    tipo: 'media',
+    cambios: [
+      'PROGRESO DE HOY (resumen de sesión): el veredicto lo decide la FUERZA (1RM estimado de tu mejor serie), no el volumen — subir de escalón de peso con menos reps ya no sale en rojo',
+      'Detección de "⬆️ ¡Nuevo escalón!" cuando tu mejor serie lleva más peso que el último entreno (o menos asistencia): se celebra en verde, y mantener la fuerza al cambiar de peso se marca como lo esperado ("normal al subir de peso, ya la recuperarás")',
+      'El volumen sigue visible en cada línea pero como dato informativo en gris, con la nota "normal al subir de escalón" cuando baja por el cambio de peso',
+      'Verde solo si la fuerza sube (>2 %), rojo solo si baja de verdad (>2 % sin escalón); ±2 % cuenta como misma fuerza',
+      'Mismo criterio en el texto de WhatsApp; ejercicios a peso corporal se comparan por repeticiones',
+      'Coherente con la tarjeta de Progresión de Tendencias (misma vara de medir: 1RM estimado). Ejemplo verificado: 60×12 (84 de 1RM est.) → 65×8 (82,3) = escalón nuevo con la fuerza intacta, no una pérdida',
+    ],
+  },
   {
     version: '2.6.1',
     fecha: '24/08/2026',
