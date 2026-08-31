@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.6.4'
+export const APP_VERSION = '2.6.5'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.6.5',
+    fecha: '31/08/2026',
+    tipo: 'media',
+    cambios: [
+      'GRÁFICO DE PESO rediseñado para el móvil: al tocar un punto queda SELECCIONADO FIJO (ya no hace falta mantener el dedo) y su detalle se muestra bajo el gráfico (fecha, peso, media 7d y diferencia con el registro anterior); tocar de nuevo o la ✕ lo quita',
+      'Rango de tiempo con chips 1M / 3M / 6M / 1A / Todo, PELLIZCO con dos dedos para ampliar o reducir el rango (14 días a todo el historial) y ARRASTRE con un dedo para desplazarse por fechas antiguas',
+      'El eje ahora es temporal de verdad (los huecos sin registros se ven como huecos) y los puntos se adaptan a la densidad',
+      'REGISTRO DE PESO: el error rojo solo aparece si falla SUPABASE de verdad; el fallo de Google Sheets (token caducado…) ya no asusta (queda en consola). Al guardar bien se muestra "☁️ Guardado en Supabase ✓"',
+      'El registro de peso usa el perfil activo (si un admin ve el perfil de Rubén, el peso va a Rubén, no al admin)',
+    ],
+  },
   {
     version: '2.6.4',
     fecha: '24/08/2026',

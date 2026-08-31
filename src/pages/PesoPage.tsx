@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/shallow'
 import { useNavigate } from 'react-router-dom'
 import { useFitLogStore } from '../store/useFitLogStore'
 import type { PerfilCorporal, CategoriaImc } from '../types/models'
-import { getUsuarioActivo, sincronizarPesoSupabase, getRubenUUID, guardarComposicion, guardarPerfilCorporal } from '../services/supabase'
+import { getUsuarioActivo, getIdActivo, sincronizarPesoSupabase, getRubenUUID, guardarComposicion, guardarPerfilCorporal } from '../services/supabase'
 import { sincronizarPeso } from '../services/googleSheets'
 
 const DIAS  = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado']
@@ -29,6 +29,7 @@ export default function PesoPage() {
   const [valor,     setValor]     = useState('')
   const [guardado,  setGuardado]  = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [syncOk,    setSyncOk]    = useState(false)
 
   const numerico = parseFloat(valor.replace(',', '.'))
   const valido   = !isNaN(numerico) && numerico > 0
@@ -46,7 +47,8 @@ export default function PesoPage() {
     }, 2000)
     const usuario = getUsuarioActivo()
     if (usuario && usuario.puedePesoCorporal) {
-      const uid = usuario.esRuben ? getRubenUUID() : usuario.id
+      // Perfil activo (perfil visto → Rubén → usuario), como el resto de la app
+      const uid = getIdActivo() ?? (usuario.esRuben ? getRubenUUID() : usuario.id)
       const fecha = new Date().toISOString().slice(0, 10)
       const { googleConfig, isAuthenticated } = useFitLogStore.getState()
       const registro = { id: '', fecha, pesoKg: numerico, sincronizado: false }
@@ -59,13 +61,18 @@ export default function PesoPage() {
         sincronizarPesoSupabase(uid, { fecha, pesoKg: numerico }),
         sheetsPromise,
       ]).then((results) => {
-        if (results[0].status === 'fulfilled' && pesoId) {
-          useFitLogStore.getState().marcarPesoSincronizado(pesoId)
-        }
-        const failed = results.find(r => r.status === 'rejected')
-        if (failed && failed.status === 'rejected') {
-          setSyncError(`Error sync: ${(failed.reason as Error)?.message ?? 'error desconocido'}`)
+        // Error SOLO si falla Supabase (la nube de verdad); Google Sheets es
+        // secundario y su fallo (token caducado, etc.) no debe asustar
+        if (results[0].status === 'fulfilled') {
+          if (pesoId) useFitLogStore.getState().marcarPesoSincronizado(pesoId)
+          setSyncOk(true)
+          setTimeout(() => setSyncOk(false), 3000)
+        } else {
+          setSyncError(`No se pudo guardar en Supabase: ${(results[0].reason as Error)?.message ?? 'error desconocido'}`)
           setTimeout(() => setSyncError(null), 6000)
+        }
+        if (results[1].status === 'rejected') {
+          console.warn('[Peso] Google Sheets no sincronizado (secundario):', results[1].reason)
         }
       })
     }
@@ -119,6 +126,11 @@ export default function PesoPage() {
         <Check size={20} strokeWidth={2.5} />
         {guardado ? '¡Guardado!' : 'Guardar peso'}
       </button>
+
+      {/* Confirmación de guardado en la nube */}
+      {syncOk && (
+        <p className="text-xs font-semibold text-emerald-400 -mt-4">☁️ Guardado en Supabase ✓</p>
+      )}
 
       {/* Toast error sync */}
       {syncError && (
@@ -300,19 +312,69 @@ function MediaSieteDias() {
 }
 
 // ── GraficaPeso ───────────────────────────────────────────────────────────────
+// Pensada para el móvil:
+//  - TOCAR un punto lo deja seleccionado (no hace falta mantener el dedo) y su
+//    detalle se muestra fijo bajo el gráfico; tocar otra vez lo deselecciona.
+//  - Chips de rango (1M/3M/6M/1A/Todo) + PELLIZCO con dos dedos para ampliar o
+//    reducir el rango, y ARRASTRE con un dedo para moverse por el tiempo.
+
+const RANGOS_PESO: { label: string; dias: number }[] = [
+  { label: '1M', dias: 30 },
+  { label: '3M', dias: 91 },
+  { label: '6M', dias: 182 },
+  { label: '1A', dias: 365 },
+  { label: 'Todo', dias: Infinity },
+]
+
+function diasEntre(a: string, b: string): number {
+  return Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86_400_000)
+}
 
 function GraficaPeso() {
   const registros = useFitLogStore(useShallow((s) => s.registrosPeso))
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; fecha: string; peso: number } | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
 
-  const datos = useMemo(() => {
-    return [...registros]
+  // Todos los registros, ascendentes, con media móvil de 7 registros
+  const todos = useMemo(() => {
+    const asc = [...registros]
+      .filter((r) => r.pesoKg > 0)
       .sort((a, b) => a.fecha.localeCompare(b.fecha))
-      .slice(-60)
+    return asc.map((r, i) => {
+      const ventana = asc.slice(Math.max(0, i - 6), i + 1)
+      return { fecha: r.fecha, peso: r.pesoKg, ma: ventana.reduce((s, x) => s + x.pesoKg, 0) / ventana.length }
+    })
   }, [registros])
 
-  if (datos.length < 3) {
+  const totalDias = todos.length > 1 ? Math.max(diasEntre(todos[0].fecha, todos[todos.length - 1].fecha), 14) : 14
+
+  const [rango,  setRango]  = useState(91)       // días visibles
+  const [offset, setOffset] = useState(0)        // días desplazados hacia atrás desde el último registro
+  const [selFecha, setSelFecha] = useState<string | null>(null)
+
+  // Gestos
+  const svgRef = useRef<SVGSVGElement>(null)
+  const punteros = useRef(new Map<number, { x: number; y: number }>())
+  const gesto = useRef<{ rango: number; offset: number; dist: number; x0: number; t0: number; movido: boolean } | null>(null)
+
+  const rangoEfectivo = Math.min(rango === Infinity ? totalDias : rango, totalDias)
+  const maxOffset = Math.max(0, totalDias - rangoEfectivo)
+  const offsetEfectivo = Math.min(offset, maxOffset)
+
+  // Datos visibles
+  const { visibles, desdeISO, hastaISO } = useMemo(() => {
+    if (todos.length === 0) return { visibles: [], desdeISO: '', hastaISO: '' }
+    const ultima = todos[todos.length - 1].fecha
+    const fin = new Date(ultima + 'T00:00:00'); fin.setDate(fin.getDate() - offsetEfectivo)
+    const ini = new Date(fin); ini.setDate(ini.getDate() - rangoEfectivo)
+    const hastaISO = fin.toLocaleDateString('sv')
+    const desdeISO = ini.toLocaleDateString('sv')
+    return { visibles: todos.filter((d) => d.fecha >= desdeISO && d.fecha <= hastaISO), desdeISO, hastaISO }
+  }, [todos, rangoEfectivo, offsetEfectivo])
+
+  const sel = selFecha !== null ? visibles.find((d) => d.fecha === selFecha) ?? null : null
+  const selIdxTodos = sel ? todos.findIndex((d) => d.fecha === sel.fecha) : -1
+  const anterior = selIdxTodos > 0 ? todos[selIdxTodos - 1] : null
+
+  if (todos.length < 3) {
     return (
       <div className="w-full max-w-xs rounded-2xl bg-zinc-900 border border-zinc-800 px-5 py-8 flex items-center justify-center">
         <p className="text-sm text-zinc-500 text-center">Añade más registros para ver la gráfica</p>
@@ -321,94 +383,135 @@ function GraficaPeso() {
   }
 
   const W = 300, H = 170
-  const PAD = { top: 16, right: 12, bottom: 28, left: 36 }
+  const PAD = { top: 14, right: 12, bottom: 24, left: 34 }
   const innerW = W - PAD.left - PAD.right
   const innerH = H - PAD.top - PAD.bottom
 
-  const pesos = datos.map((d) => d.pesoKg)
-  const rawMin = Math.min(...pesos)
-  const rawMax = Math.max(...pesos)
-  const margin = Math.max((rawMax - rawMin) * 0.2, 0.5)
-  const minP = rawMin - margin
-  const maxP = rawMax + margin
+  const pesos = visibles.map((d) => d.peso)
+  const rawMin = pesos.length ? Math.min(...pesos) : 0
+  const rawMax = pesos.length ? Math.max(...pesos) : 1
+  const margen = Math.max((rawMax - rawMin) * 0.2, 0.5)
+  const minP = rawMin - margen
+  const maxP = rawMax + margen
 
-  const toX = (i: number) =>
-    PAD.left + (datos.length === 1 ? innerW / 2 : (i / (datos.length - 1)) * innerW)
-  const toY = (p: number) =>
-    PAD.top + innerH - ((p - minP) / (maxP - minP)) * innerH
+  const tsDesde = new Date(desdeISO + 'T00:00:00').getTime()
+  const tsHasta = new Date(hastaISO + 'T00:00:00').getTime()
+  const toX = (fecha: string) => {
+    const t = new Date(fecha + 'T00:00:00').getTime()
+    return PAD.left + (tsHasta === tsDesde ? innerW / 2 : ((t - tsDesde) / (tsHasta - tsDesde)) * innerW)
+  }
+  const toY = (p: number) => PAD.top + innerH - ((p - minP) / (maxP - minP)) * innerH
 
-  const points = datos.map((d, i) => ({
-    x: toX(i),
-    y: toY(d.pesoKg),
-    fecha: d.fecha,
-    peso: d.pesoKg,
-  }))
+  const pts = visibles.map((d) => ({ x: toX(d.fecha), y: toY(d.peso), yMa: toY(d.ma), d }))
 
-  // Smooth cubic bezier path
-  function smoothPath(pts: { x: number; y: number }[]): string {
-    if (pts.length < 2) return `M ${pts[0].x} ${pts[0].y}`
-    let d = `M ${pts[0].x} ${pts[0].y}`
+  const smooth = (getY: (p: typeof pts[number]) => number): string => {
+    if (pts.length === 0) return ''
+    if (pts.length === 1) return `M ${pts[0].x} ${getY(pts[0])}`
+    let path = `M ${pts[0].x} ${getY(pts[0])}`
     for (let i = 1; i < pts.length; i++) {
-      const prev = pts[i - 1]
-      const curr = pts[i]
-      const cx = (prev.x + curr.x) / 2
-      d += ` C ${cx} ${prev.y} ${cx} ${curr.y} ${curr.x} ${curr.y}`
+      const cx = (pts[i - 1].x + pts[i].x) / 2
+      path += ` C ${cx} ${getY(pts[i - 1])} ${cx} ${getY(pts[i])} ${pts[i].x} ${getY(pts[i])}`
     }
-    return d
+    return path
   }
+  const linePath   = smooth((p) => p.y)
+  const maPath     = smooth((p) => p.yMa)
+  const areaPath   = pts.length > 1
+    ? `${linePath} L ${pts[pts.length - 1].x} ${PAD.top + innerH} L ${pts[0].x} ${PAD.top + innerH} Z`
+    : ''
 
-  const linePath = smoothPath(points)
-  const lastPt = points[points.length - 1]
-  const firstPt = points[0]
-  const areaPath = `${linePath} L ${lastPt.x} ${PAD.top + innerH} L ${firstPt.x} ${PAD.top + innerH} Z`
-
-  // 7-day moving average
-  const movAvgPoints = datos.map((_, i) => {
-    const window = datos.slice(Math.max(0, i - 6), i + 1)
-    const avg = window.reduce((s, r) => s + r.pesoKg, 0) / window.length
-    return { x: toX(i), y: toY(avg) }
-  })
-  const movAvgPath = smoothPath(movAvgPoints)
-
-  // Y axis ticks (4 steps)
   const yTicks = [0, 1, 2, 3, 4].map((i) => minP + (i / 4) * (maxP - minP))
+  const fFecha = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
+  const xTicks = pts.length <= 6 ? pts.map((p) => p.d.fecha)
+    : [0, 1, 2, 3].map((i) => visibles[Math.round((i / 3) * (visibles.length - 1))].fecha)
 
-  // X axis ticks
-  const xTickIndices =
-    datos.length <= 7
-      ? datos.map((_, i) => i)
-      : [0, Math.round(dados_length_third(datos.length)), Math.round(2 * dados_length_third(datos.length)), datos.length - 1]
+  // ── Gestos ────────────────────────────────────────────────────────────────
+  const posDe = (e: React.PointerEvent): { x: number; y: number } => {
+    const rect = svgRef.current!.getBoundingClientRect()
+    return { x: ((e.clientX - rect.left) / rect.width) * W, y: ((e.clientY - rect.top) / rect.height) * H }
+  }
+  const distancia = (): number => {
+    const [a, b] = [...punteros.current.values()]
+    return Math.hypot(a.x - b.x, a.y - b.y) || 1
+  }
 
-  function dados_length_third(len: number) { return len / 3 }
-
-  const formatFecha = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
-
-  const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    const rect = svgRef.current?.getBoundingClientRect()
-    if (!rect) return
-    const px = ((e.clientX - rect.left) / rect.width) * W
-    let closest = points[0]
-    let minDist = Math.abs(px - points[0].x)
-    for (const p of points) {
-      const dist = Math.abs(px - p.x)
-      if (dist < minDist) { minDist = dist; closest = p }
-    }
-    if (minDist < (innerW / datos.length) * 0.8) {
-      setTooltip({ x: closest.x, y: closest.y, fecha: closest.fecha, peso: closest.peso })
-    } else {
-      setTooltip(null)
+  const onDown = (e: React.PointerEvent) => {
+    try { svgRef.current?.setPointerCapture(e.pointerId) } catch { /* puntero sintético o ya liberado */ }
+    punteros.current.set(e.pointerId, posDe(e))
+    gesto.current = {
+      rango: rangoEfectivo, offset: offsetEfectivo,
+      dist: punteros.current.size === 2 ? distancia() : 0,
+      x0: posDe(e).x, t0: e.timeStamp, movido: gesto.current?.movido ?? false,
     }
   }
 
-  const ttW = 64, ttH = 28
-  const ttX = tooltip ? (tooltip.x + ttW + 12 > W ? tooltip.x - ttW - 8 : tooltip.x + 8) : 0
-  const ttY = tooltip ? Math.max(PAD.top, tooltip.y - ttH / 2) : 0
+  const onMove = (e: React.PointerEvent) => {
+    if (!punteros.current.has(e.pointerId) || !gesto.current) return
+    punteros.current.set(e.pointerId, posDe(e))
+    if (punteros.current.size === 2) {
+      // Pellizco: separar dedos = acercar (menos días); juntar = alejar
+      if (gesto.current.dist === 0) { gesto.current.dist = distancia(); gesto.current.rango = rangoEfectivo }
+      const factor = gesto.current.dist / distancia()
+      const nuevo = Math.round(Math.min(Math.max(gesto.current.rango * factor, 14), totalDias))
+      gesto.current.movido = true
+      setRango(nuevo >= totalDias ? Infinity : nuevo)
+    } else if (punteros.current.size === 1) {
+      const dx = posDe(e).x - gesto.current.x0
+      if (Math.abs(dx) > 6) gesto.current.movido = true
+      // Arrastrar hacia la derecha = ver días más antiguos
+      const dias = (dx / innerW) * rangoEfectivo
+      setOffset(Math.min(Math.max(gesto.current.offset + dias, 0), maxOffset))
+    }
+  }
+
+  const onUp = (e: React.PointerEvent) => {
+    const fueTap = punteros.current.size === 1 && gesto.current && !gesto.current.movido && e.timeStamp - gesto.current.t0 < 600
+    punteros.current.delete(e.pointerId)
+    if (fueTap && pts.length > 0) {
+      const { x } = posDe(e)
+      let cercano = pts[0]
+      for (const p of pts) if (Math.abs(p.x - x) < Math.abs(cercano.x - x)) cercano = p
+      setSelFecha((prev) => (prev === cercano.d.fecha ? null : cercano.d.fecha))
+    }
+    if (punteros.current.size === 0) gesto.current = null
+    else if (gesto.current) { gesto.current.dist = 0; gesto.current.x0 = [...punteros.current.values()][0].x; gesto.current.offset = offsetEfectivo }
+  }
+
+  const rangoActivo = RANGOS_PESO.find((r) => r.dias === rango || (r.dias === Infinity && rango === Infinity))
 
   return (
     <div className="w-full max-w-xs rounded-2xl bg-zinc-900 border border-zinc-800 overflow-hidden">
       <div className="px-4 pt-4 pb-1">
-        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Evolución del peso</p>
-        <div className="flex items-center gap-4 mt-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Evolución del peso</p>
+          {!rangoActivo && (
+            <span className="text-[10px] font-bold text-zinc-400 bg-zinc-800 rounded-full px-2 py-0.5 tabular-nums">
+              {rangoEfectivo} días
+            </span>
+          )}
+        </div>
+
+        {/* Rango de tiempo */}
+        <div className="flex items-center gap-1.5 mt-2">
+          {RANGOS_PESO.map((r) => {
+            const activo = rangoActivo?.label === r.label
+            return (
+              <button
+                key={r.label}
+                onClick={() => { setRango(r.dias); setOffset(0) }}
+                aria-pressed={activo}
+                className={[
+                  'flex-1 rounded-lg py-1.5 text-[11px] font-bold transition-colors',
+                  activo ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-400 active:bg-zinc-700',
+                ].join(' ')}
+              >
+                {r.label}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex items-center gap-4 mt-2">
           <div className="flex items-center gap-1.5">
             <svg width="16" height="4" viewBox="0 0 16 4"><line x1="0" y1="2" x2="16" y2="2" stroke="#34d399" strokeWidth="2" strokeLinecap="round"/></svg>
             <span className="text-xs text-zinc-500">Peso</span>
@@ -423,10 +526,12 @@ function GraficaPeso() {
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        style={{ touchAction: 'pan-y' }}
-        onPointerMove={handlePointerMove}
-        onPointerLeave={() => setTooltip(null)}
+        className="w-full select-none"
+        style={{ touchAction: 'none' }}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
       >
         <defs>
           <linearGradient id="pesoAreaGrad" x1="0" y1="0" x2="0" y2="1">
@@ -435,92 +540,69 @@ function GraficaPeso() {
           </linearGradient>
         </defs>
 
-        {/* Grid lines horizontal */}
-        {yTicks.map((tick, i) => (
-          <line
-            key={i}
-            x1={PAD.left} y1={toY(tick)}
-            x2={W - PAD.right} y2={toY(tick)}
-            stroke="#27272a" strokeWidth="1"
-          />
+        {yTicks.map((t, i) => (
+          <g key={i}>
+            <line x1={PAD.left} y1={toY(t)} x2={W - PAD.right} y2={toY(t)} stroke="#27272a" strokeWidth="1" />
+            <text x={PAD.left - 4} y={toY(t) + 3.5} textAnchor="end" fill="#52525b" fontSize="7.5">{t.toFixed(1)}</text>
+          </g>
         ))}
 
-        {/* Y labels */}
-        {yTicks.map((tick, i) => (
-          <text
-            key={i}
-            x={PAD.left - 4} y={toY(tick) + 3.5}
-            textAnchor="end" fill="#52525b" fontSize="7.5"
-          >
-            {tick.toFixed(1)}
+        {xTicks.map((f) => (
+          <text key={f} x={toX(f)} y={H - 6} textAnchor="middle" fill="#52525b" fontSize="7.5">{fFecha(f)}</text>
+        ))}
+
+        {pts.length === 0 && (
+          <text x={W / 2} y={H / 2} textAnchor="middle" fill="#71717a" fontSize="9">
+            Sin registros en este rango — arrastra o cambia el rango
           </text>
-        ))}
+        )}
 
-        {/* X labels */}
-        {xTickIndices.map((idx) => (
-          <text
-            key={idx}
-            x={toX(idx)} y={H - 6}
-            textAnchor="middle" fill="#52525b" fontSize="7.5"
-          >
-            {formatFecha(datos[idx].fecha)}
-          </text>
-        ))}
+        {pts.length > 1 && <path d={areaPath} fill="url(#pesoAreaGrad)" />}
+        {pts.length > 1 && <path d={maPath} fill="none" stroke="#a78bfa" strokeWidth="1.5" strokeDasharray="5 3" strokeLinecap="round" />}
+        {pts.length > 1 && <path d={linePath} fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
 
-        {/* Area fill */}
-        <path d={areaPath} fill="url(#pesoAreaGrad)" />
-
-        {/* Moving average line */}
-        <path
-          d={movAvgPath}
-          fill="none"
-          stroke="#a78bfa"
-          strokeWidth="1.5"
-          strokeDasharray="5 3"
-          strokeLinecap="round"
-        />
-
-        {/* Main line */}
-        <path
-          d={linePath}
-          fill="none"
-          stroke="#34d399"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {/* Points */}
-        {points.map((p, i) => (
+        {pts.map((p) => (
           <circle
-            key={i}
+            key={p.d.fecha}
             cx={p.x} cy={p.y}
-            r={tooltip?.x === p.x && tooltip?.y === p.y ? 4 : 2.5}
+            r={sel?.fecha === p.d.fecha ? 4.5 : pts.length > 40 ? 1.8 : 2.5}
             fill="#34d399"
-            stroke="#18181b"
+            stroke={sel?.fecha === p.d.fecha ? '#ffffff' : '#18181b'}
             strokeWidth="1.5"
           />
         ))}
 
-        {/* Tooltip */}
-        {tooltip && (
-          <>
-            <line
-              x1={tooltip.x} y1={PAD.top}
-              x2={tooltip.x} y2={PAD.top + innerH}
-              stroke="#52525b" strokeWidth="1" strokeDasharray="3 2"
-            />
-            <circle cx={tooltip.x} cy={tooltip.y} r="4.5" fill="#34d399" stroke="#ffffff" strokeWidth="1.5" />
-            <rect x={ttX} y={ttY} width={ttW} height={ttH} rx="7" fill="#27272a" stroke="#3f3f46" strokeWidth="0.8" />
-            <text x={ttX + ttW / 2} y={ttY + 11} textAnchor="middle" fill="#ffffff" fontSize="9" fontWeight="bold">
-              {tooltip.peso.toFixed(1)} kg
-            </text>
-            <text x={ttX + ttW / 2} y={ttY + 22} textAnchor="middle" fill="#a1a1aa" fontSize="8">
-              {formatFecha(tooltip.fecha)}
-            </text>
-          </>
+        {sel && (
+          <line x1={toX(sel.fecha)} y1={PAD.top} x2={toX(sel.fecha)} y2={PAD.top + innerH} stroke="#52525b" strokeWidth="1" strokeDasharray="3 2" />
         )}
       </svg>
+
+      {/* Detalle fijo del punto seleccionado (no desaparece al levantar el dedo) */}
+      <div className="px-4 pb-3 min-h-10">
+        {sel ? (
+          <div className="flex items-center justify-between rounded-xl bg-zinc-800/80 px-3 py-2">
+            <div>
+              <p className="text-xs font-bold text-white tabular-nums">
+                {sel.fecha.slice(8, 10)}/{sel.fecha.slice(5, 7)}/{sel.fecha.slice(0, 4)}
+                <span className="ml-2 text-emerald-400">{sel.peso} kg</span>
+              </p>
+              <p className="text-[10px] text-zinc-500 tabular-nums">
+                Media 7d: {sel.ma.toFixed(1)} kg
+                {anterior && (
+                  <span className={sel.peso - anterior.peso > 0 ? 'text-red-400' : sel.peso - anterior.peso < 0 ? 'text-emerald-400' : ''}>
+                    {' · '}{sel.peso - anterior.peso > 0 ? '+' : ''}{(sel.peso - anterior.peso).toFixed(1)} vs anterior ({fFecha(anterior.fecha)})
+                  </span>
+                )}
+              </p>
+            </div>
+            <button onClick={() => setSelFecha(null)} className="text-zinc-500 text-xs font-bold px-2 py-1 active:text-white" aria-label="Quitar selección">✕</button>
+          </div>
+        ) : (
+          <p className="text-[10px] text-zinc-600 text-center pt-1">
+            Toca un punto para fijarlo · pellizca para ampliar · arrastra para moverte
+          </p>
+        )}
+      </div>
     </div>
   )
 }
