@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.6.5'
+export const APP_VERSION = '2.6.6'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,17 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.6.6',
+    fecha: '31/08/2026',
+    tipo: 'menor',
+    cambios: [
+      'BUG: al desplazarse por el gráfico de peso quedaban puntos verdes fantasma fijos en pantalla',
+      'Causa principal: los puntos usaban la fecha como key de React y hay días con DOS registros de peso (p. ej. 10/08) — con keys duplicadas React deja círculos huérfanos al re-renderizar durante el arrastre',
+      'Fix: keys únicas por punto, actualización limitada a un frame por refresco durante arrastre/pellizco (requestAnimationFrame) y el SVG en su propia capa de composición (evita las estelas de repintado de iOS Safari)',
+      'Verificado: tras arrastres repetidos ida y vuelta el número de puntos coincide exactamente con los visibles, sin duplicados ni avisos',
+    ],
+  },
   {
     version: '2.6.5',
     fecha: '31/08/2026',

@@ -354,6 +354,19 @@ function GraficaPeso() {
   const svgRef = useRef<SVGSVGElement>(null)
   const punteros = useRef(new Map<number, { x: number; y: number }>())
   const gesto = useRef<{ rango: number; offset: number; dist: number; x0: number; t0: number; movido: boolean } | null>(null)
+  // Máximo una actualización por frame (evita repintados a medias y estelas en iOS)
+  const rafRef = useRef(0)
+  const pendienteRef = useRef<(() => void) | null>(null)
+  const enFrame = (fn: () => void) => {
+    pendienteRef.current = fn
+    if (rafRef.current) return
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0
+      pendienteRef.current?.()
+      pendienteRef.current = null
+    })
+  }
+  useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
   const rangoEfectivo = Math.min(rango === Infinity ? totalDias : rango, totalDias)
   const maxOffset = Math.max(0, totalDias - rangoEfectivo)
@@ -454,13 +467,14 @@ function GraficaPeso() {
       const factor = gesto.current.dist / distancia()
       const nuevo = Math.round(Math.min(Math.max(gesto.current.rango * factor, 14), totalDias))
       gesto.current.movido = true
-      setRango(nuevo >= totalDias ? Infinity : nuevo)
+      enFrame(() => setRango(nuevo >= totalDias ? Infinity : nuevo))
     } else if (punteros.current.size === 1) {
       const dx = posDe(e).x - gesto.current.x0
       if (Math.abs(dx) > 6) gesto.current.movido = true
       // Arrastrar hacia la derecha = ver días más antiguos
       const dias = (dx / innerW) * rangoEfectivo
-      setOffset(Math.min(Math.max(gesto.current.offset + dias, 0), maxOffset))
+      const nuevoOffset = Math.min(Math.max(gesto.current.offset + dias, 0), maxOffset)
+      enFrame(() => setOffset(nuevoOffset))
     }
   }
 
@@ -527,7 +541,7 @@ function GraficaPeso() {
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         className="w-full select-none"
-        style={{ touchAction: 'none' }}
+        style={{ touchAction: 'none', transform: 'translateZ(0)', willChange: 'contents' }}
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
@@ -561,9 +575,9 @@ function GraficaPeso() {
         {pts.length > 1 && <path d={maPath} fill="none" stroke="#a78bfa" strokeWidth="1.5" strokeDasharray="5 3" strokeLinecap="round" />}
         {pts.length > 1 && <path d={linePath} fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
 
-        {pts.map((p) => (
+        {pts.map((p, i) => (
           <circle
-            key={p.d.fecha}
+            key={`${p.d.fecha}-${i}`}
             cx={p.x} cy={p.y}
             r={sel?.fecha === p.d.fecha ? 4.5 : pts.length > 40 ? 1.8 : 2.5}
             fill="#34d399"
