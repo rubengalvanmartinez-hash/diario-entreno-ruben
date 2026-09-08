@@ -236,13 +236,27 @@ function ModalElegirEjercicio({
   onCerrar: () => void
 }) {
   const todosEjercicios = useFitLogStore(useShallow((s) => s.ejercicios))
+  const historial       = useFitLogStore(useShallow((s) => s.historialSesiones))
   const [nuevoNombre, setNuevoNombre] = useState('')
   const [modoNuevo,   setModoNuevo]   = useState(false)
 
+  // Nombres de la configuración + nombres que solo existen en el historial.
+  // Elegir un nombre del historial garantiza que el ejercicio recupere sus datos.
   const nombresUnicos = useMemo(() => {
-    const set = new Set(todosEjercicios.map((e) => e.nombre))
-    return [...set].sort((a, b) => a.localeCompare(b))
-  }, [todosEjercicios])
+    const config = new Map<string, string>()
+    for (const e of todosEjercicios) config.set(nombreCanonico(e.nombre), e.nombre)
+    const soloHistorial = new Map<string, string>()
+    for (const ses of historial) for (const ej of ses.ejercicios) {
+      const n = (ej.nombreSustituido ?? ej.nombreSnapshot ?? '').trim()
+      if (!n) continue
+      const k = nombreCanonico(n)
+      if (!config.has(k) && !soloHistorial.has(k)) soloHistorial.set(k, n)
+    }
+    return [
+      ...[...config.values()].map((nombre) => ({ nombre, historial: false })),
+      ...[...soloHistorial.values()].map((nombre) => ({ nombre, historial: true })),
+    ].sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }, [todosEjercicios, historial])
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-end justify-center">
@@ -286,15 +300,23 @@ function ModalElegirEjercicio({
                   <span className="text-sm font-semibold text-blue-400">+ Añadir nombre nuevo</span>
                 </button>
               </li>
-              {nombresUnicos.map((nombre) => (
+              {nombresUnicos.map(({ nombre, historial: esHist }) => (
                 <li key={nombre}>
                   <button
                     onClick={() => onElegir(nombre)}
-                    className="w-full flex items-center justify-between px-5 py-3.5 text-left
+                    className="w-full flex items-center justify-between gap-2 px-5 py-3.5 text-left
                                active:bg-zinc-800 border-t border-zinc-800/60"
                   >
-                    <span className="text-sm text-white">{nombre}</span>
-                    <ChevronRight size={16} className="text-zinc-600 shrink-0" />
+                    <span className="text-sm text-white truncate">{nombre}</span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      {esHist && (
+                        <span className="text-[10px] uppercase tracking-wide text-amber-400/90
+                                         border border-amber-500/30 rounded-full px-2 py-0.5">
+                          historial
+                        </span>
+                      )}
+                      <ChevronRight size={16} className="text-zinc-600" />
+                    </span>
                   </button>
                 </li>
               ))}
@@ -324,6 +346,7 @@ function EjercicioCard({
   onEliminar: () => void
 }) {
   const actualizarEjercicio = useFitLogStore((s) => s.actualizarEjercicio)
+  const moverEjercicio      = useFitLogStore((s) => s.moverEjercicio)
 
   const [nombre, setNombre]           = useState(ejercicio.nombre)
   const [notas, setNotas]             = useState(ejercicio.notasFijas)
@@ -448,6 +471,21 @@ function EjercicioCard({
           Toca de nuevo para confirmar el borrado
         </p>
       )}
+
+      {/* Mover a otro día (conserva id, nombre, notas e historial) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] uppercase tracking-wide text-zinc-500">Mover a</span>
+        {([1, 2, 3] as DiaId[]).filter((d) => d !== ejercicio.dia).map((d) => (
+          <button
+            key={d}
+            onClick={() => moverEjercicio(ejercicio.id, d)}
+            className="rounded-full border border-zinc-700 px-3 py-1 text-xs font-semibold text-zinc-300
+                       active:bg-zinc-800"
+          >
+            {DIA_NOMBRE[d]}
+          </button>
+        ))}
+      </div>
 
       {/* Row 2: imagen */}
       <div className="flex items-center gap-3">

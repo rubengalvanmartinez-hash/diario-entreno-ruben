@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.6.6'
+export const APP_VERSION = '2.6.7'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.6.7',
+    fecha: '08/09/2026',
+    tipo: 'media',
+    cambios: [
+      'BUG: al "cambiar de día" un ejercicio (p. ej. Jalón al pecho) aparecía "Primera vez" sin su histórico',
+      'Causa: no existía botón para mover de día, así que había que borrarlo y volver a añadirlo; el listado de nombres solo mostraba los de la configuración actual, y al escribirlo a mano quedaba con un nombre distinto al del historial',
+      'Nuevo botón "Mover a Día X" en cada ejercicio de Ajustes: conserva id, nombre, notas e historial',
+      'El selector de nombre ahora incluye también los nombres que solo existen en el historial (etiqueta "historial"): elegir uno recupera sus datos',
+      'La tarjeta "Primera vez" avisa si hay historial con un nombre parecido y sugiere cuál usar',
+    ],
+  },
   {
     version: '2.6.6',
     fecha: '31/08/2026',

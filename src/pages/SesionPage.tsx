@@ -816,6 +816,7 @@ function EjercicioCard({
       <UltimoEntrenoCard
         ultimoEntreno={ultimoEntreno}
         penultimoEntreno={penultimoEntreno}
+        nombreActual={nombre}
         seriesActuales={series}
         objetivo={objetivoDir}
         objetivoPeso={objetivoPesoLocal}
@@ -1101,6 +1102,7 @@ function UltimoEntrenoCard({
   objetivo,
   objetivoPeso,
   referencia,
+  nombreActual,
 }: {
   ultimoEntreno: { fecha: string; series: Serie[]; ayudaFede: boolean } | null
   penultimoEntreno: { series: Serie[] } | null
@@ -1109,15 +1111,47 @@ function UltimoEntrenoCard({
   objetivoPeso: number | null
   /** En Fitness Park: factor aplicado y referencia Entrena-T del último entreno */
   referencia?: { factor: number; hayEq: boolean; refMaxET: number | null } | null
+  /** Nombre del ejercicio actual (para sugerir nombres parecidos del historial si no hay match) */
+  nombreActual?: string
 }) {
   const ultimaSyncTimestamp = useFitLogStore((s) => s.ultimaSyncTimestamp)
+  const historialSesiones   = useFitLogStore(useShallow((s) => s.historialSesiones))
+
+  // Si no hay último entreno, buscar nombres del historial parecidos al actual
+  // (mismas palabras clave) para avisar de un posible nombre distinto.
+  const parecidos = useMemo(() => {
+    if (ultimoEntreno || !nombreActual) return [] as string[]
+    const STOP = new Set(['de', 'al', 'en', 'con', 'a', 'el', 'la', 'y', 'del', 'los', 'las'])
+    const toks = (n: string) => new Set(normalizarNombre(n).split(' ').filter((t) => t.length >= 3 && !STOP.has(t)))
+    const actual = toks(nombreActual)
+    if (actual.size === 0) return []
+    const vistos = new Map<string, string>()
+    for (const ses of historialSesiones) for (const ej of ses.ejercicios) {
+      const n = (ej.nombreSustituido ?? ej.nombreSnapshot ?? '').trim()
+      if (!n || nombreCanonico(n) === nombreCanonico(nombreActual)) continue
+      const t = toks(n)
+      let comunes = 0
+      for (const x of actual) if (t.has(x)) comunes++
+      if (comunes > 0 && !vistos.has(nombreCanonico(n))) vistos.set(nombreCanonico(n), n)
+    }
+    return [...vistos.values()].slice(0, 3)
+  }, [ultimoEntreno, nombreActual, historialSesiones])
+
   if (!ultimoEntreno) {
     return (
       <div className="mx-5 animate-in fade-in slide-in-from-top-2 duration-300">
         <div className="rounded-xl bg-yellow-950 border border-yellow-700/40 py-2 px-3
-                        flex items-center gap-2">
-          <span className="text-sm leading-none">⭐</span>
-          <span className="text-xs font-bold text-yellow-400">Primera vez en este ejercicio</span>
+                        flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm leading-none">⭐</span>
+            <span className="text-xs font-bold text-yellow-400">Primera vez en este ejercicio</span>
+          </div>
+          {parecidos.length > 0 && (
+            <p className="text-[11px] text-yellow-200/70 leading-snug">
+              Hay historial con un nombre parecido: {parecidos.map((n) => `“${n}”`).join(', ')}.
+              Si es el mismo ejercicio, ponle ese nombre en Ajustes para recuperar sus datos.
+            </p>
+          )}
         </div>
       </div>
     )
