@@ -154,7 +154,7 @@ function parseDiaParam(raw: string | undefined): SessionDia | null {
   return n === 1 || n === 2 || n === 3 ? (n as DiaId) : null
 }
 
-const DIA_NOMBRE: Record<string, string> = {
+export const DIA_NOMBRE: Record<string, string> = {
   '1': 'Día 1', '2': 'Día 2', '3': 'Día 3',
   'parcial': 'Parcial', 'extra': 'Ejercicio extra',
 }
@@ -1935,6 +1935,7 @@ function generarTextoWhatsApp(
       .join(' | ')
     lines.push(`  ${seriesStr}`)
     if (ej.ayudaFede) lines.push('  💪 Fede ayudó')
+    if (ej.notaSesion?.trim()) lines.push(`  📝 ${ej.notaSesion.trim()}`)
 
     // Récord / primera vez
     const ejNombre    = ej.nombreSustituido ?? ej.nombreSnapshot
@@ -1973,7 +1974,7 @@ function generarTextoWhatsApp(
   // Sección progreso (la fuerza manda; el volumen es secundario)
   if (progresos.length > 0) {
     lines.push('')
-    lines.push('📈 Progreso de hoy')
+    lines.push('📈 Progreso')
     for (const p of progresos) {
       const lin = lineaFuerza(p)
       const med = lineaMedia(p)
@@ -2068,7 +2069,52 @@ function MiniFuerza({ previas, hoy }: { previas: number[]; hoy: number }) {
   )
 }
 
-function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
+/**
+ * Valoración automática de la sesión en 1-2 frases, generada de los datos.
+ */
+function valorarSesion(
+  totales: ReturnType<typeof calcularTotales>,
+  progresos: ProgresoEjercicio[],
+  completados: SesionEjercicio[],
+  saltados: number,
+): { texto: string; tono: 'bueno' | 'neutro' | 'flojo' } {
+  const mejoras  = progresos.filter((p) => p.veredicto === 'escalon' || p.veredicto === 'sube' || lineaFuerza(p).mejora).length
+  const bajadas  = progresos.filter((p) => p.veredicto === 'baja').length
+  const escalones = progresos.filter((p) => p.veredicto === 'escalon').length
+  let fallo = 0, rir0 = 0
+  for (const ej of completados) for (const s of ej.series) {
+    if (s.etiqueta === 'fallo') fallo++
+    else if (s.etiqueta === 'rir0') rir0++
+  }
+  const partes: string[] = []
+  partes.push(
+    saltados > 0
+      ? `Sesión con ${totales.totalEjercicios} ejercicio${totales.totalEjercicios !== 1 ? 's' : ''} (${saltados} saltado${saltados !== 1 ? 's' : ''}) y ${totales.totalSeries} series.`
+      : `Sesión completa: ${totales.totalEjercicios} ejercicio${totales.totalEjercicios !== 1 ? 's' : ''}, ${totales.totalSeries} series y ${fmtKg(totales.totalKg)} kg movidos.`,
+  )
+  if (escalones > 0) partes.push(`${escalones} ejercicio${escalones !== 1 ? 's' : ''} con subida de peso.`)
+  else if (mejoras > 0) partes.push(`${mejoras} ejercicio${mejoras !== 1 ? 's' : ''} con mejora de fuerza.`)
+  if (bajadas > 0) partes.push(`${bajadas} por debajo del último entreno.`)
+  if (fallo + rir0 > 0) partes.push(`${fallo + rir0} serie${fallo + rir0 !== 1 ? 's' : ''} al límite (${fallo} al fallo, ${rir0} RIR 0).`)
+  const tono: 'bueno' | 'neutro' | 'flojo' =
+    mejoras > 0 && mejoras >= bajadas ? 'bueno' : bajadas > mejoras ? 'flojo' : 'neutro'
+  partes.push(tono === 'bueno' ? 'Buen día de progresión.' : tono === 'flojo' ? 'Día de mantenimiento, sin subidas.' : 'Sesión estable.')
+  return { texto: partes.join(' '), tono }
+}
+
+function ValoracionSesion({ v }: { v: ReturnType<typeof valorarSesion> }) {
+  const cl = v.tono === 'bueno' ? 'border-emerald-500/30 bg-emerald-950/30 text-emerald-200'
+           : v.tono === 'flojo' ? 'border-orange-500/30 bg-orange-950/30 text-orange-200'
+           :                      'border-zinc-700 bg-zinc-900 text-zinc-300'
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${cl}`}>
+      <p className="text-[11px] font-bold uppercase tracking-widest opacity-70 mb-1">Valoración</p>
+      <p className="text-sm leading-snug">{v.texto}</p>
+    </div>
+  )
+}
+
+function SeccionProgresoHoy({ progresos, titulo = 'Progreso de hoy' }: { progresos: ProgresoEjercicio[]; titulo?: string }) {
   if (progresos.length === 0) return null
 
   const hayMejora = progresos.some((p) => p.veredicto === 'escalon' || p.veredicto === 'sube' || lineaFuerza(p).mejora)
@@ -2077,7 +2123,7 @@ function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
     <div className="bg-zinc-900 border border-zinc-700 rounded-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300 mb-4">
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center gap-2">
         <span className="text-base select-none">📈</span>
-        <h3 className="font-bold text-white text-sm">Progreso de hoy</h3>
+        <h3 className="font-bold text-white text-sm">{titulo}</h3>
         <span className="ml-auto text-[10px] text-zinc-600">fuerza = 1RM estimado</span>
       </div>
       <div className="divide-y divide-zinc-800/60">
@@ -2127,10 +2173,12 @@ function SeccionProgresoHoy({ progresos }: { progresos: ProgresoEjercicio[] }) {
 
 // ── ResumenSesion — componente ────────────────────────────────────────────────
 
-function ResumenSesion({
+export function ResumenSesion({
   sesion, historialPrevio, diaNombre, hayObjetivoSuperado, onFinalizar, onSeguir, syncing, syncError,
+  modoHistorial = false,
 }: {
   sesion: Sesion
+  /** Historial con el que comparar. En modo historial: SOLO sesiones anteriores a la fecha consultada. */
   historialPrevio: Sesion[]
   diaNombre: string
   hayObjetivoSuperado: boolean
@@ -2138,6 +2186,8 @@ function ResumenSesion({
   onSeguir: () => void
   syncing?: boolean
   syncError?: string | null
+  /** Informe de un día pasado: sin confeti, botón "Volver", sin "Seguir editando". */
+  modoHistorial?: boolean
 }) {
   const [modo,    setModo]    = useState<ModoResumen>('visual')
 
@@ -2165,12 +2215,19 @@ function ResumenSesion({
   )
 
   useEffect(() => {
+    if (modoHistorial) return
     lanzarEmojis()
     if (hayObjetivoSuperado) {
       setTimeout(lanzarObjetivoCelebration, 600)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const valoracion = useMemo(
+    () => valorarSesion(totales, progresos, completados, saltados.length),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sesion.id, progresos],
+  )
 
   const handleCopiar = async () => {
     const texto = generarTextoWhatsApp(sesion, sesionRef, diaNombre, totales, historialPrevio, progresos)
@@ -2183,7 +2240,7 @@ function ResumenSesion({
 
   return (
     <div
-      className="fixed inset-0 z-50 overflow-y-auto"
+      className="fixed inset-0 z-[60] overflow-y-auto"
       style={{ background: 'linear-gradient(to bottom, #09090b 0%, #18181b 100%)' }}
     >
       {/* ── Cabecera fija ── */}
@@ -2192,10 +2249,16 @@ function ResumenSesion({
         style={{ background: 'linear-gradient(to bottom, #09090b 70%, transparent)' }}
       >
         <div className="flex items-center gap-3 max-w-lg mx-auto">
-          <span className="text-3xl select-none">🏋️</span>
+          <span className="text-3xl select-none">{modoHistorial ? '📅' : '🏋️'}</span>
           <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-black text-white leading-tight">Sesión completada</h1>
-            <p className="text-sm text-zinc-500 tabular-nums">{fecha}</p>
+            <h1 className="text-xl font-black text-white leading-tight">
+              {modoHistorial ? `Entreno del ${fecha}` : 'Sesión completada'}
+            </h1>
+            <p className="text-sm text-zinc-500 tabular-nums">
+              {modoHistorial
+                ? `${diaNombre}${sesion.gimnasio === 'fitnesspark' ? ' · Fitness Park' : ''}`
+                : fecha}
+            </p>
           </div>
           <div className="flex items-center bg-zinc-800 rounded-xl p-1 gap-1 shrink-0">
             {(['visual', 'texto'] as ModoResumen[]).map((m) => (
@@ -2342,6 +2405,13 @@ function ResumenSesion({
                     })}
                   </div>
 
+                  {ej.notaSesion?.trim() && (
+                    <div className="px-4 py-2 border-t border-zinc-800/60 flex items-start gap-1.5">
+                      <span className="text-sm leading-none mt-0.5">📝</span>
+                      <p className="text-xs text-zinc-400 italic leading-snug">{ej.notaSesion.trim()}</p>
+                    </div>
+                  )}
+
                   {/* Banner récord / primera vez */}
                   {diferenciaEsBuena && diferencia !== null && (
                     <div className="px-4 py-2 border-t border-zinc-800/60 flex items-center gap-1.5">
@@ -2372,7 +2442,10 @@ function ResumenSesion({
             })}
 
             {/* Sección progreso de volumen — al final, solo si hay subidas */}
-            <SeccionProgresoHoy progresos={progresos} />
+            <SeccionProgresoHoy progresos={progresos} titulo={modoHistorial ? 'Progreso de ese día' : 'Progreso de hoy'} />
+
+            {/* Valoración general automática */}
+            <ValoracionSesion v={valoracion} />
           </>
         ) : (
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
@@ -2417,15 +2490,17 @@ function ResumenSesion({
             disabled={syncing}
             className="w-full rounded-2xl bg-blue-600 py-4 font-bold text-white text-base active:bg-blue-700 disabled:opacity-60 flex items-center justify-center gap-2"
           >
-            {syncing ? 'Sincronizando…' : 'Cerrar'}
+            {syncing ? 'Sincronizando…' : modoHistorial ? 'Volver' : 'Cerrar'}
           </button>
-          <button
-            onClick={onSeguir}
-            disabled={syncing}
-            className="w-full py-2.5 rounded-2xl text-sm font-semibold text-zinc-500 active:bg-zinc-800 transition-colors disabled:opacity-40"
-          >
-            Seguir editando
-          </button>
+          {!modoHistorial && (
+            <button
+              onClick={onSeguir}
+              disabled={syncing}
+              className="w-full py-2.5 rounded-2xl text-sm font-semibold text-zinc-500 active:bg-zinc-800 transition-colors disabled:opacity-40"
+            >
+              Seguir editando
+            </button>
+          )}
         </div>
       </div>
     </div>

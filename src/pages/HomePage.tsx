@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Dumbbell, Scale, Ruler, AlertCircle, RefreshCw, Users, ChevronDown, MapPin } from 'lucide-react'
+import { Dumbbell, Scale, Ruler, AlertCircle, RefreshCw, Users, ChevronDown, MapPin, CalendarDays } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectTotalPendientes } from '../store/useFitLogStore'
 import {
@@ -221,7 +221,7 @@ function DiasDesdeUltimo() {
 
 // ── ActionCard / AccionesHome ─────────────────────────────────────────────────
 
-type Color = 'blue' | 'emerald' | 'violet'
+type Color = 'blue' | 'emerald' | 'violet' | 'green'
 
 function AccionesHome() {
   const navigate = useNavigate()
@@ -251,6 +251,13 @@ function AccionesHome() {
           onClick={() => navigate('/medidas')}
         />
       )}
+      <ActionCard
+        icon={<CalendarDays size={28} />}
+        title="Historial de entrenos"
+        subtitle="Calendario e informe de cada día"
+        color="green"
+        onClick={() => navigate('/historial')}
+      />
     </div>
   )
 }
@@ -259,6 +266,7 @@ const COLOR_MAP: Record<Color, { bg: string; icon: string; border: string }> = {
   blue:    { bg: 'bg-blue-500/10',    icon: 'text-blue-400',    border: 'border-blue-500/20'    },
   emerald: { bg: 'bg-emerald-500/10', icon: 'text-emerald-400', border: 'border-emerald-500/20' },
   violet:  { bg: 'bg-violet-500/10',  icon: 'text-violet-400',  border: 'border-violet-500/20'  },
+  green:   { bg: 'bg-green-500/15',   icon: 'text-green-400',   border: 'border-green-500/30'   },
 }
 
 function ActionCard({

@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.6.7'
+export const APP_VERSION = '2.7.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,18 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.7.0',
+    fecha: '26/09/2026',
+    tipo: 'media',
+    cambios: [
+      'NUEVO: botón verde "Historial de entrenos" en Inicio con calendario de las últimas 8 semanas (navegable hacia atrás); los días entrenados salen en verde, más intenso si hubo varias sesiones, y hoy con borde',
+      'Al tocar un día se abre el INFORME de esa sesión con el mismo formato que el resumen de fin de sesión: ejercicios, series (reps × kg), etiquetas Fallo / RIR 0 / RIR 1, ayuda de Fede, subidas y bajadas de peso vs el entreno anterior, progreso de fuerza y volumen, notas y botón "Copiar para WhatsApp"',
+      'Las comparaciones del informe usan SOLO sesiones anteriores a ese día (nunca posteriores)',
+      'Nuevo bloque "Valoración" al final del resumen (también al terminar una sesión): 1-2 frases generadas de los datos (ejercicios, subidas, series al fallo…)',
+      'El resumen y el texto WhatsApp ahora incluyen la nota de sesión de cada ejercicio (📝)',
+    ],
+  },
   {
     version: '2.6.7',
     fecha: '08/09/2026',
