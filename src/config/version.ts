@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.7.0'
+export const APP_VERSION = '2.8.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.8.0',
+    fecha: '28/09/2026',
+    tipo: 'mayor',
+    cambios: [
+      'NUEVO: "Evidencia de adaptación por músculo" (botón en Tendencias): motor estadístico MEAM v2.3 que evalúa cada músculo a fecha de corte semanal (lunes) con estado (Progresando / Estable / Descenso / Regresión probable / Sin evidencia), confianza, acción sugerida y detalle "¿Por qué?" (T, D, σ, ρ, cambio en kg, MDS en kg/mes por ejercicio)',
+      'Fatiga: detecta caídas persistentes con contexto de carga alta o en varios ejercicios, propone una descarga y comprueba el rebote; el tipo de sesión (Normal / Descarga) se marca en la sesión activa (junto al gimnasio) o desde el Historial en sesiones pasadas',
+      'Datos: series → exposición con calentamiento inferido (carga < 90 % de la máxima), top set entre las 3 primeras series de trabajo, filtro de erratas (> 25 %), descarga inferida (pocas series y carga baja), RIR solo del top set, asistidos con peso corporal (dominadas), una exposición por día',
+      'Mapa ejercicio → músculo/cluster por palabras clave, corregible por usuario (tabla meam_variants); lista de ejercicios sin asignar en la propia pantalla',
+      'Snapshots semanales inmutables (meam_snapshots, con versión de modelo/config e input_hash); ejecutar supabase_v2.8.0_meam.sql (añade entrenos.tipo_sesion, índice único por serie y las dos tablas). Sin el SQL la app sigue funcionando, pero no guarda tipo de sesión ni snapshots',
+      'Verificación: el núcleo TypeScript reproduce la implementación de referencia Python snapshot a snapshot (381 snapshots dorados de 16 escenarios) y añade 20 tests de la capa de datos (test-meam.mts)',
+    ],
+  },
   {
     version: '2.7.0',
     fecha: '26/09/2026',

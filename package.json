@@ -1,13 +1,15 @@
 {
   "name": "fitlog-pwa",
   "private": true,
-  "version": "1.5.4",
+  "version": "2.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:meam": "rolldown test-meam.mts --file node_modules/.tmp/test-meam.mjs --format esm --platform node && node node_modules/.tmp/test-meam.mjs",
+    "test:logic": "rolldown test-logic.mts --file node_modules/.tmp/test-logic.mjs --format esm --platform node && node node_modules/.tmp/test-logic.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",

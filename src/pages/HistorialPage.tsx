@@ -6,6 +6,7 @@ import { useFitLogStore } from '../store/useFitLogStore'
 import { useHistorialRef } from '../hooks/useHistorialRef'
 import type { Sesion } from '../types/models'
 import { ResumenSesion, DIA_NOMBRE } from './SesionPage'
+import { getIdActivo, sincronizarEntrenoSupabase } from '../services/supabase'
 
 // ── Utilidades de fecha (todo en fecha local, formato ISO YYYY-MM-DD) ─────────
 
@@ -48,6 +49,8 @@ export default function HistorialPage() {
   const historialRef = useHistorialRef()
   // Historial "crudo" (kg reales de cada gimnasio) para mostrar las series
   const historialCrudo = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const cambiarTipoSesionHistorial = useFitLogStore((s) => s.cambiarTipoSesionHistorial)
+  const marcarSincronizada = useFitLogStore((s) => s.marcarSesionSincronizada)
 
   // Desplazamiento en bloques de 8 semanas (0 = las últimas 8)
   const [offset, setOffset] = useState(0)
@@ -260,6 +263,30 @@ export default function HistorialPage() {
         <p className="text-center text-sm text-zinc-500 py-6">
           Todavía no hay entrenos guardados. Cuando completes una sesión aparecerá aquí.
         </p>
+      )}
+
+      {/* Tipo de sesión (MEAM): marcar una sesión pasada como descarga */}
+      {sesionSel && (
+        <div className="mx-0 mb-2 flex items-center justify-between rounded-2xl bg-zinc-900 border border-zinc-800 px-4 py-2">
+          <span className="text-[11px] text-zinc-400">Tipo de sesión para el análisis</span>
+          <button
+            onClick={() => {
+              const t = sesionSel.tipoSesion === 'deload' ? 'normal' : 'deload'
+              const actualizada = cambiarTipoSesionHistorial(sesionSel.id, t)
+              if (actualizada) {
+                setSesionSel(actualizada)
+                const uid = getIdActivo()
+                if (uid) sincronizarEntrenoSupabase(uid, actualizada).then(() => marcarSincronizada(actualizada.id)).catch((e) => console.warn('[MEAM] no se pudo sincronizar el tipo de sesión:', e))
+              }
+            }}
+            className={[
+              'text-[11px] font-bold rounded-full px-3 py-1 leading-none',
+              sesionSel.tipoSesion === 'deload' ? 'bg-sky-500/15 text-sky-400' : 'bg-zinc-800 text-zinc-400',
+            ].join(' ')}
+          >
+            {sesionSel.tipoSesion === 'deload' ? '↓ Descarga' : 'Normal'}
+          </button>
+        </div>
       )}
 
       {/* Informe del día (mismo componente que el resumen de fin de sesión) */}

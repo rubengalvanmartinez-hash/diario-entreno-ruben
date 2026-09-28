@@ -17,6 +17,7 @@ import {
   crearSesionEjercicio,
   crearSeriesVacias,
   fechaHoy,
+  type TipoSesionMeam,
 } from '../types/models'
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,10 @@ export interface FitLogActions {
   setGimnasioActual: (g: GimnasioId) => void
   /** Cambia el gimnasio de la sesión activa (y el actual) */
   cambiarGimnasioSesionActiva: (g: GimnasioId) => void
+  /** Marca la sesión activa como normal / descarga / rehab / test (MEAM) */
+  cambiarTipoSesionActiva: (t: TipoSesionMeam) => void
+  /** Marca una sesión del historial (por id) como normal / descarga / rehab / test; devuelve la sesión actualizada o null */
+  cambiarTipoSesionHistorial: (id: string, t: TipoSesionMeam) => Sesion | null
   /** Fija (o borra con null) el factor de equivalencia de un ejercicio (clave: nombre canónico) */
   setEquivalencia: (clave: string, factor: number | null) => void
   /** Reemplaza todas las equivalencias (carga desde Supabase) */
@@ -760,6 +765,30 @@ export const useFitLogStore = create<FitLogStore>()(
           gimnasioActual: g,
           sesionActiva: s.sesionActiva ? { ...s.sesionActiva, gimnasio: g } : null,
         }))
+      },
+
+      cambiarTipoSesionActiva(t) {
+        set((s) => {
+          if (!s.sesionActiva) return s
+          const { tipoSesion: _omitir, ...resto } = s.sesionActiva
+          void _omitir
+          return { sesionActiva: t === 'normal' ? { ...resto } : { ...resto, tipoSesion: t } }
+        })
+      },
+
+      cambiarTipoSesionHistorial(id, t) {
+        let actualizada: Sesion | null = null
+        set((s) => {
+          const historialSesiones = s.historialSesiones.map((ses) => {
+            if (ses.id !== id) return ses
+            const { tipoSesion: _omitir, ...resto } = ses
+            void _omitir
+            actualizada = t === 'normal' ? { ...resto, sincronizado: false } : { ...resto, tipoSesion: t, sincronizado: false }
+            return actualizada
+          })
+          return { historialSesiones }
+        })
+        return actualizada
       },
 
       setEquivalencia(clave, factor) {

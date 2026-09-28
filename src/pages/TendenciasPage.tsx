@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown, ChevronRight, ArrowLeft, AlertTriangle, X } from 'lucide-react'
+import { Trophy, Layers, TrendingUp, TrendingDown, Flame, BarChart2, Minus, Zap, Medal, FileDown, ChevronRight, ArrowLeft, AlertTriangle, X, Activity } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { getUsuarioActivo, getIdActivo, actualizarSerieSupabase } from '../services/supabase'
@@ -489,6 +489,18 @@ export default function TendenciasPage() {
     <div className="flex flex-col pb-8">
       <div className="px-4 pt-6 pb-4 flex items-center gap-3">
         <h1 className="text-2xl font-black text-white tracking-tight">Tendencias</h1>
+      </div>
+
+      {/* Evidencia de adaptación (MEAM) */}
+      <div className="mx-4 mb-4">
+        <button
+          onClick={() => navigate('/meam')}
+          className="w-full flex items-center justify-center gap-2 rounded-2xl bg-zinc-900 border border-zinc-800
+                     py-3 text-sm font-bold text-zinc-300 active:bg-zinc-700"
+        >
+          <Activity size={16} />
+          Evidencia de adaptación por músculo
+        </button>
       </div>
 
       {/* Progreso corporal — solo si puede_peso_corporal */}
