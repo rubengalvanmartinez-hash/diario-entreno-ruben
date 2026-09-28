@@ -212,5 +212,61 @@ check("'Bíceps' vía alias → clave canónica 'biceps con barra fija'", constr
   check("'Remo al mentón' → hombro", inferirVariante('Remo al mentón').musculo === 'hombro')
   check("'Fondos' → pecho, peso corporal + lastre", inferirVariante('Fondos').equipment === 'weighted_bodyweight')
 }
+{
+  // indicador SIN_MEJORA_EN_6 (auditoría 7): bloque actual + referencia = mejor de las 12 anteriores + récord de reps por carga
+  const N = 'Press de pecho'
+  const mapa = construirMapaVariantes([N])
+  const s3 = (id: string, fecha: string, reps: number, kg: number) => sesion(id, fecha, [{ nombre: N, series: [serie(1, reps, kg), serie(2, reps, kg), serie(3, reps, kg)] }])
+  // (a) 20 semanas subiendo hasta un pico, luego parón de 60 días y 8 sesiones a un nivel más bajo pero subiendo ⇒ el récord antiguo NO cuenta
+  {
+    const ses: SesionConTipo[] = []
+    for (let i = 0; i < 20; i++) ses.push(s3(`a${i}`, fechaN(i * 7), 8, 100 + 2.5 * i))          // pico 147,5 × 8
+    for (let j = 0; j < 8; j++) ses.push(s3(`b${j}`, fechaN(19 * 7 + 60 + j * 7), 8, 110 + 2.5 * j))   // vuelta: 110 → 127,5, con récord en cada sesión del bloque
+    const dv = derivarExposiciones(ses, mapa).variantes.get('press de pecho')!
+    check('7a: el bloque actual empieza tras el parón', dv.bloqueDesde === fechaN(19 * 7 + 60))
+    check('7a: hay récord dentro del bloque aunque no se bata el pico previo al parón', dv.sinMejoraEn6 === false)
+    check('7a: la referencia es del bloque actual (< 147,5 kg)', dv.mejorMarca !== null && dv.mejorMarca.topLoad < 147.5 && dv.mejorMarca.nPrevias === 2)
+    const inf = ejecutarMeam(ses, mapa, [], { hoy: fechaN(19 * 7 + 60 + 8 * 7) })
+    const e = inf.musculos.find((m) => m.musculo === 'pecho')!.ejercicios[0]
+    check('7a: la UI cuenta sesiones y fecha del mismo bloque', e.bloqueDesde === fechaN(19 * 7 + 60) && e.nExposiciones === 8)
+  }
+  // (b) 30 semanas: pico aislado en la semana 5 (una errata readmitida no: un buen día), luego meseta ⇒ la referencia son las 12 anteriores, no el pico
+  {
+    const ses: SesionConTipo[] = []
+    for (let i = 0; i < 30; i++) ses.push(s3(`c${i}`, fechaN(i * 7), i === 5 ? 10 : 8, 100))         // semana 5: 100 × 10 (e1RM 133) — luego siempre 100 × 8
+    ses[29] = s3('c29', fechaN(29 * 7), 9, 100)                                                        // última: 100 × 9 = récord de reps frente a las 12 anteriores
+    const dv = derivarExposiciones(ses, mapa).variantes.get('press de pecho')!
+    check('7b: referencia = mejor de las 12 anteriores (100 × 8), no el pico de la semana 5', dv.mejorMarca !== null && dv.mejorMarca.topReps === 8 && dv.mejorMarca.nPrevias === 12)
+    check('7b: 100 × 9 en la última sesión es récord de reps a esa carga', dv.sinMejoraEn6 === false)
+  }
+  // (c) mismas 18 sesiones planas ⇒ sin récord; y con < 7 normales en el bloque no se calcula (mejorMarca null)
+  {
+    const ses: SesionConTipo[] = []
+    for (let i = 0; i < 18; i++) ses.push(s3(`d${i}`, fechaN(i * 7), 8, 100))
+    const dv = derivarExposiciones(ses, mapa).variantes.get('press de pecho')!
+    check('7c: meseta ⇒ sin récord', dv.sinMejoraEn6 === true && dv.mejorMarca !== null)
+    const pocas = derivarExposiciones(ses.slice(0, 6), mapa).variantes.get('press de pecho')!
+    check('7c: con 6 sesiones no se calcula', pocas.sinMejoraEn6 === false && pocas.mejorMarca === null)
+  }
+  // (e) tras un parón > 42 días la referencia de erratas se reinicia: volver un 22 % más flojo NO es una errata
+  {
+    const ses: SesionConTipo[] = []
+    for (let i = 0; i < 10; i++) ses.push(s3(`f${i}`, fechaN(i * 7), 8, 140))
+    ses.push(s3('g0', fechaN(9 * 7 + 60), 8, 110))
+    const dv = derivarExposiciones(ses, mapa).variantes.get('press de pecho')!
+    check('7e: la primera sesión tras el parón se conserva (no errata)', dv.erratas.length === 0 && dv.exps.length === 11)
+    const sinParon = derivarExposiciones([...ses.slice(0, 10), s3('g0', fechaN(10 * 7), 8, 110)], mapa).variantes.get('press de pecho')!
+    check('7e: el mismo bajón sin parón sí es errata', sinParon.erratas.length === 1)
+  }
+  // (d) asistido: la marca muestra los kg de ayuda apuntados, no la carga efectiva
+  {
+    const pesos: RegistroPeso[] = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, fecha: fechaN(i * 7), pesoKg: 80, sincronizado: true }))
+    const ses: SesionConTipo[] = []
+    for (let i = 0; i < 10; i++) ses.push(sesion(`e${i}`, fechaN(i * 7), [{ nombre: 'Dominadas asistidas', series: [serie(1, 8, 25), serie(2, 8, 25), serie(3, 7, 25)] }]))
+    const mapaA = construirMapaVariantes(['Dominadas asistidas'], [], new Set(['dominadas asistidas']))
+    const dv = derivarExposiciones(ses, mapaA, pesos).variantes.get('dominadas asistidas')!
+    check('7d: asistido ⇒ carga efectiva 55 y peso registrado 25 kg de ayuda', dv.mejorMarca !== null && Math.abs(dv.mejorMarca.topLoad - 55) < 1e-9 && Math.abs(dv.mejorMarca.pesoRegistrado - 25) < 1e-9 && dv.mejorMarca.tipoCarga === 'ayuda')
+  }
+}
 console.log(`${total} comprobaciones, ${fallos} fallos (con las correcciones de la auditoría 6)`)
 if (fallos > 0) process.exit(1)

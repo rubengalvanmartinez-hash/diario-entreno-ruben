@@ -66,6 +66,9 @@ export const MEAM_CONFIG = {
   exclusion_max_weeks_52w: 10.0, exclusion_typical_episode_weeks: 4.0,
   context_percentile: 80, context_window_weeks: 12, context_pain_min: 2, volume_high_percentile: 70, volume_low_percentile: 40, volume_very_low_percentile: 25,
   no_improvement_exposures: 6,
+  // referencia del indicador SIN_MEJORA_EN_6: mejor marca de las 12 exposiciones normales anteriores del bloque (≈ 3 meses a 1/sem), no de todo el
+  // histórico: el máximo de un bloque largo es una marca inflada por el ruido y volvía el aviso casi permanente (solo capa TS; sin equivalente Python)
+  no_improvement_reference_exposures: 12,
   // calibración
   target_false_regression_per_variant_year: 0.10, target_false_progress_per_variant_year: 0.15,
 } as const

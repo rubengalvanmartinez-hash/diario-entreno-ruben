@@ -5,7 +5,7 @@
  */
 import type { RegistroPeso } from '../types/models'
 import { MEAM_CONFIG as CFG } from './config'
-import { theilSen } from './core'
+import { theilSen, segments } from './core'
 import { runSnapshots, variantDef, mdsKgPerMonth, type VariantDef, type SnapshotRow, type VariantEvidence, type ContextCache } from './engine'
 import { derivarExposiciones, percentilVolumen, reduccionesDeVolumen, lunesDeIso, diasEntre, isoAddDays, type SesionConTipo, type DerivedVariant, type SemanaVolumen } from './exposure'
 import { MUSCULOS_MEAM, MUSCULOS_ORDEN, type MeamMuscle, type VariantMeta } from './variants'
@@ -17,6 +17,10 @@ export interface InformeEjercicio {
   T: number; pendientePctSem: number; mdsKgMes: number; e1rmActual: number; tier: string; nExposiciones: number
   calidadTemporal: string; estrato: string; sinMejoraEn6: boolean; TLong: number; flags: string[]; ultimaFecha: string
   erratas: number; rirDisponible: number
+  /** primera exposición del bloque actual AL CORTE (mismo segmento que nExposiciones: parón > 42 días o ruptura de protocolo); '' si no hay */
+  bloqueDesde: string
+  /** mejor marca de las (hasta) 12 exposiciones anteriores a las últimas 6 del bloque: la referencia de «sin récord» */
+  mejorMarca: DerivedVariant['mejorMarca']
 }
 
 export interface InformeMusculo {
@@ -111,6 +115,14 @@ function confianzaDe(row: SnapshotRow, rhoCalibrado: boolean): Confianza {
   // ALTA exige además ρ calibrado: sin autocorrelación medida no se afirma la máxima confianza
   if (dir !== 0 && clustersDetectando >= 2 && todosEstablecidos && rhoCalibrado) return 'ALTA'
   return 'MEDIA'
+}
+
+/** Primera exposición del segmento que el motor evalúa en el corte (exposiciones con t < corte; mismos cortes de segmento que variantDef). */
+function bloqueDesdeAlCorte(dv: DerivedVariant, corte: number): string {
+  const sub = dv.exps.filter((e) => e.t < corte)          // prefijo: exps está ordenado por t y alineado con extras
+  const segs = segments(sub, dv.rupturasPropuestas)
+  const seg = segs.length ? segs[segs.length - 1] : []
+  return seg.length ? dv.extras[seg[0]].fecha : ''
 }
 
 /** Ventana real de la tendencia («las últimas N semanas»): el span de los ejercicios que la sostienen, entre 6 y 16 semanas. */
@@ -241,8 +253,8 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
     const sesionesUlt3 = new Set(dvs.flatMap((dv) => dv.extras.filter((x) => x.t >= corte - 3 && x.t < corte).map((x) => x.sesionId))).size
     const rhoCal = fila.evidence.rho_calibrated
     const conf = confianzaConHisteresis(rows)
-    // «estancado» a nivel músculo: ningún récord en NINGUNO de los ejercicios con indicador calculable (≥ 7 exposiciones normales)
-    const conIndicador = dvs.filter((dv) => dv.extras.filter((x) => x.tipo === 'normal').length >= 7)
+    // «estancado» a nivel músculo: ningún récord en NINGUNO de los ejercicios con indicador calculable (bloque actual con ≥ 7 exposiciones normales)
+    const conIndicador = dvs.filter((dv) => dv.mejorMarca !== null)
     const sinMejora = conIndicador.length > 0 && conIndicador.every((dv) => dv.sinMejoraEn6)
     const [accionTitulo, accionTexto] = accionDe(fila, conf, sinMejora, volPct, fase, pesoSlope, ctxAlto.has(corte))
     const ev = fila.evidence
@@ -258,6 +270,7 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
         calidadTemporal: v.temporal_quality, estrato: v.stratum, sinMejoraEn6: dv.sinMejoraEn6, TLong: v.T_long, flags: v.flags,
         ultimaFecha: dv.extras.length ? dv.extras[dv.extras.length - 1].fecha : '', erratas: dv.erratas.length,
         rirDisponible: dv.extras.filter((x) => x.rir !== null).length,
+        bloqueDesde: bloqueDesdeAlCorte(dv, corte), mejorMarca: dv.mejorMarca,
       }
     })
     const e1rmMedio = ejercicios.map((e) => e.e1rmActual).filter(Number.isFinite)

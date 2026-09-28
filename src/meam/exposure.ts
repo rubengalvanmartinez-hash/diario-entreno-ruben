@@ -18,7 +18,7 @@ import { serieConDatos } from '../types/models'
 import { nombreCanonico } from '../utils/normalizar'
 import { MEAM_CONFIG as CFG } from './config'
 import { median } from './mathx'
-import { makeExposure, type Exposure, type SessionType } from './core'
+import { makeExposure, segments, type Exposure, type SessionType } from './core'
 import type { VariantMeta, MeamMuscle } from './variants'
 
 /** La app aún no persiste tipo de sesión; esta extensión opcional la introduce el módulo (columna entrenos.tipo_sesion). */
@@ -49,7 +49,13 @@ export interface DerivedVariant {
   erratas: ExposureExtra[]
   /** exposiciones por sesión de reps a carga fija (canal P3) cuando no hay e1RM válido: [t, reps] */
   repsSinE1rm: Array<[number, number]>
+  /** SIN_MEJORA_EN_6: en las últimas 6 exposiciones normales del BLOQUE ACTUAL no hay récord de e1RM ni de reps a la carga habitual */
   sinMejoraEn6: boolean
+  /** mejor marca de las (hasta) 12 exposiciones normales anteriores a esas 6, dentro del bloque: la referencia que hay que batir; null si no se calcula.
+   *  pesoRegistrado = lo que el usuario apuntó (kg de ayuda en asistidos, lastre en peso corporal, carga en el resto); topLoad = carga efectiva. */
+  mejorMarca: { e1rm: number; topLoad: number; topReps: number; fecha: string; pesoRegistrado: number; tipoCarga: 'peso' | 'ayuda' | 'lastre'; nPrevias: number } | null
+  /** fecha de la primera exposición del bloque actual (tras el último parón > gap_segment_reset_days o ruptura de protocolo) */
+  bloqueDesde: string | null
   /** rupturas de protocolo propuestas (t): ≥3 "erratas" consecutivas del mismo signo = nuevo nivel (otra máquina, kg por lado…) */
   rupturasPropuestas: number[]
 }
@@ -132,11 +138,13 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
   const epoch = lunesDeIso(filas[0].fecha)
   const tDe = (fecha: string): number => diasEntre(epoch, fecha) / 7
   // historial por variante para inferir deload y erratas (causal: solo sesiones anteriores)
-  const hist = new Map<string, { sets: number[]; loads: number[]; lnE1rm: number[]; fechas: string[]; racha: ExposureExtra[]; rachaSigno: number }>()
+  type Hist = { sets: number[]; loads: number[]; lnE1rm: number[]; fechas: string[]; racha: ExposureExtra[]; rachaSigno: number; ultimaFecha: string }
+  const nuevoHist = (): Hist => ({ sets: [], loads: [], lnE1rm: [], fechas: [], racha: [], rachaSigno: 0, ultimaFecha: '' })
+  const hist = new Map<string, Hist>()
   for (const f of filas) {
     let meta = mapa.get(f.key)
     if (!meta) { sinMapa.add(f.nombre); meta = { key: f.key, nombre: f.nombre, musculo: 'otros', cluster: 'OTROS', role: 'DIRECT', equipment: 'compound_free', esAsistencia: false, aislamiento: false, inferido: true } }
-    if (!variantes.has(f.key)) variantes.set(f.key, { meta, exps: [], extras: [], erratas: [], repsSinE1rm: [], sinMejoraEn6: false, rupturasPropuestas: [] })
+    if (!variantes.has(f.key)) variantes.set(f.key, { meta, exps: [], extras: [], erratas: [], repsSinE1rm: [], sinMejoraEn6: false, mejorMarca: null, bloqueDesde: null, rupturasPropuestas: [] })
     const dv = variantes.get(f.key)!
     const t = tDe(f.fecha)
     // --- volumen semanal por músculo (series con datos y series duras) ---
@@ -184,7 +192,11 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
     const e1rm = epley(top.carga as number, top.reps)
     const y = Math.log(e1rm)
     // --- deload inferido (causal): base = sesiones normales de los 28 días previos (mín. 3) ---
-    const h = hist.get(f.key) ?? { sets: [], loads: [], lnE1rm: [], fechas: [], racha: [], rachaSigno: 0 }
+    let h = hist.get(f.key) ?? nuevoHist()
+    // parón > gap_segment_reset_days: el motor abre un segmento nuevo, así que la referencia de erratas y de deload también se reinicia.
+    // Sin esto, al volver de un parón rindiendo menos (lo normal) las primeras sesiones se descartaban como erratas (auditoría 7).
+    if (h.ultimaFecha && diasEntre(h.ultimaFecha, f.fecha) > CFG.gap_segment_reset_days) h = nuevoHist()
+    h.ultimaFecha = f.fecha
     let deloadInf = false
     const base = h.fechas.map((_, i) => i).filter((i) => diasEntre(h.fechas[i], f.fecha) <= 28)
     if (base.length >= 3) {
@@ -237,17 +249,30 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
     const orden = dv.extras.map((_, i) => i).sort((a, b) => dv.extras[a].t - dv.extras[b].t)
     dv.extras = orden.map((i) => dv.extras[i]); dv.exps = orden.map((i) => dv.exps[i])
   }
-  // indicador operativo SIN_MEJORA_EN_6_EXPOSICIONES (descriptivo, escala de entrenador)
+  // indicador operativo SIN_MEJORA_EN_6_EXPOSICIONES (descriptivo, escala de entrenador).
+  // Se evalúa dentro del BLOQUE ACTUAL (mismo criterio de segmento que el motor: parón > gap_segment_reset_days o ruptura de
+  // protocolo propuesta). Antes comparaba con el máximo de TODO el histórico: tras un parón o un cambio de máquina/forma de
+  // contar los kg, el récord antiguo era inalcanzable y el aviso salía en todos los ejercicios (auditoría 7 / prueba real).
   for (const dv of variantes.values()) {
-    const normales = dv.extras.filter((x) => x.tipo === 'normal')
-    if (normales.length < 7) continue
-    const ultimas = normales.slice(-CFG.no_improvement_exposures), previas = normales.slice(0, -CFG.no_improvement_exposures)
-    const mejorPrevio = Math.max(...previas.map((x) => x.e1rm))
-    const cargaHabitual = median(ultimas.map((x) => x.topLoad))
-    const repsPreviasACarga = Math.max(0, ...previas.filter((x) => Math.abs(x.topLoad - cargaHabitual) < 1e-6).map((x) => x.topReps))
-    const mejoraE1rm = ultimas.some((x) => x.e1rm > mejorPrevio + 1e-9)
-    const recordReps = ultimas.some((x) => Math.abs(x.topLoad - cargaHabitual) < 1e-6 && x.topReps > repsPreviasACarga)
+    const segs = segments(dv.exps, dv.rupturasPropuestas)
+    const bloque = segs.length ? segs[segs.length - 1] : []
+    dv.bloqueDesde = bloque.length ? dv.extras[bloque[0]].fecha : null
+    const normales = bloque.map((i) => dv.extras[i]).filter((x) => x.tipo === 'normal')
+    if (normales.length < CFG.no_improvement_exposures + 1) continue
+    const ultimas = normales.slice(-CFG.no_improvement_exposures)
+    const previas = normales.slice(0, -CFG.no_improvement_exposures).slice(-CFG.no_improvement_reference_exposures)
+    let mejor = previas[0]
+    for (const x of previas) if (x.e1rm > mejor.e1rm) mejor = x
+    const mejoraE1rm = ultimas.some((x) => x.e1rm > mejor.e1rm + 1e-9)
+    // récord de reps: cada una de las últimas 6 frente a las previas a SU misma carga (la mediana de 6 cargas puede no coincidir con ninguna)
+    const recordReps = ultimas.some((u) => {
+      const aEsaCarga = previas.filter((x) => Math.abs(x.topLoad - u.topLoad) < 1e-6)
+      return aEsaCarga.length > 0 && u.topReps > Math.max(...aEsaCarga.map((x) => x.topReps))
+    })
     dv.sinMejoraEn6 = !mejoraE1rm && !recordReps
+    const tipoCarga = dv.meta.esAsistencia ? 'ayuda' : dv.meta.equipment === 'weighted_bodyweight' ? 'lastre' : 'peso'
+    const pesoRegistrado = mejor.bwRef === null ? mejor.topLoad : tipoCarga === 'ayuda' ? mejor.bwRef - mejor.topLoad : tipoCarga === 'lastre' ? mejor.topLoad - mejor.bwRef : mejor.topLoad
+    dv.mejorMarca = { e1rm: mejor.e1rm, topLoad: mejor.topLoad, topReps: mejor.topReps, fecha: mejor.fecha, pesoRegistrado, tipoCarga, nPrevias: previas.length }
   }
   const volumenPorMusculo = new Map<MeamMuscle, SemanaVolumen[]>()
   for (const [m, vm] of volumen) volumenPorMusculo.set(m, [...vm.values()].sort((a, b) => a.semana - b.semana))

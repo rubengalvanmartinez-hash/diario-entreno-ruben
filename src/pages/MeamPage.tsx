@@ -17,6 +17,7 @@ import { ICONO_GRUPO, COLOR_GRUPO } from '../components/gruposUI'
 import type { VariantOverride, MeamMuscle } from '../meam/variants'
 import type { InformeMeam, InformeMusculo, InformeEjercicio, Confianza } from '../meam/run'
 import { cargarVariantesRevisadas, guardarSnapshots } from '../meam/services'
+import { MEAM_CONFIG } from '../meam/config'
 
 // ---------------------------------------------------------------------------
 // Vocabulario visual (semáforo, fiabilidad, glosario) — solo presentación
@@ -63,11 +64,45 @@ const FIABILIDAD: Record<Confianza, { puntos: number; label: string; color: stri
 const TIER: Record<string, string> = { NONE: 'sin datos', PROVISIONAL: 'pocas sesiones', ESTABLISHED: 'establecido', MATURE: 'maduro' }
 const CALIDAD: Record<string, string> = { REGULAR: 'ritmo regular', IRREGULAR: 'ritmo irregular', ESCASA: 'pocas sesiones' }
 const estratoLegible = (s: string): string => (s.startsWith('r') ? `${s.slice(1).replace('-', '–')} reps` : s)
-/** Etiquetas y avisos del motor (ENUM_CON_GUIONES) en minúsculas con espacios. */
-const legible = (s: string): string => s.toLowerCase().replace(/_/g, ' ')
+/** Etiquetas y avisos del motor en lenguaje llano; los no listados salen en minúsculas con espacios. */
+const GLOSARIO: Record<string, string> = {
+  D_NO_DISPONIBLE: 'aún no hay sesiones recientes suficientes para comparar (D)',
+  N_STATE_INSUFICIENTE: 'pocas sesiones en la ventana para calcular la tendencia',
+  POST_INTERRUPCION: 'parón reciente',
+  POST_INTERRUPCION_SIN_CAMBIO_DE_NIVEL: 'tras el parón sigues al mismo nivel',
+  POST_INTERRUPCION_CON_CAMBIO_DE_NIVEL: 'tras el parón el nivel ha cambiado',
+  CAMBIO_DE_ESTRATO_PENDIENTE: 'cambio de rango de repeticiones reciente (pendiente de asentarse)',
+  CAMBIO_DE_ESTRATO_RECIENTE: 'cambio de rango de repeticiones reciente',
+  PENDIENTE_HETEROGENEA_ENTRE_ESTRATOS: 'la tendencia no coincide entre rangos de repeticiones',
+  RECIENTE_ESCASA: 'pocas sesiones recientes',
+  SERIE_CUANTIZADA: 'saltos de peso grandes para lo que mueves (poca resolución)',
+  EXCLUSION_EXCESIVA: 'demasiadas semanas apartadas del cálculo de ruido',
+  TENDENCIA_POSITIVA_NO_CONCLUYENTE: 'apunta a mejora, no concluyente',
+  TENDENCIA_NEGATIVA_NO_CONCLUYENTE: 'apunta a bajada, no concluyente',
+  PROGRESO_RECIENTE_NO_CONFIRMADO: 'mejora en la ventana no confirmada por las últimas semanas',
+  PROGRESO_LENTO_26S: 'mejora lenta a 26 semanas',
+  DECLIVE_LENTO_26S: 'bajada lenta a 26 semanas',
+  EVIDENCIA_MIXTA: 'unos ejercicios suben y otros bajan',
+  SIN_CAMBIO_DETECTABLE: 'sin cambio detectable',
+  DESCENSO_DETECTADO_PENDIENTE_CONFIRMACION: 'bajada detectada, pendiente de confirmar',
+  DESCENSO_AISLADO_VIGILAR: 'bajada en un solo ejercicio: vigilar',
+  CAIDA_TRANSITORIA: 'bajón pasajero',
+  CAIDA_PERSISTENTE_NO_ATRIBUIDA: 'bajón que dura y no se explica por cansancio',
+  REDUCCION_SIN_REBOTE_CLARO: 'hubo descarga pero sin rebote claro',
+  RECUPERADA: 'recuperado',
+  RECUPERADA_TARDIA: 'recuperado, tarde',
+  RECAIDA: 'recaída',
+  CIERRE_APOYADA_POR_TIEMPO: 'episodio cerrado por tiempo',
+  CIERRE_POR_NUEVO_NIVEL: 'episodio cerrado: nuevo nivel',
+  NO_EVALUABLE_CAMBIO_PROTOCOLO: 'no evaluable: cambio de protocolo',
+}
+const legible = (s: string): string => GLOSARIO[s] ?? s.toLowerCase().replace(/_/g, ' ')
 const FASE: Record<InformeMeam['faseNutricional'], string> = { deficit: 'perdiendo peso', mantenimiento: 'peso estable', superavit: 'ganando peso', desconocida: '' }
 
 const fmt = (x: number, d = 2): string => (Number.isFinite(x) ? x.toFixed(d) : '—')
+/** «150 kg × 10», «+10 kg de lastre × 8» o «25 kg de ayuda × 8»: siempre lo que el usuario apuntó, no la carga efectiva */
+const marcaLegible = (m: NonNullable<InformeEjercicio['mejorMarca']>): string =>
+  m.tipoCarga === 'ayuda' ? `${fmt(m.pesoRegistrado, 1)} kg de ayuda × ${m.topReps}` : m.tipoCarga === 'lastre' ? `${m.pesoRegistrado > 0 ? '+' : ''}${fmt(m.pesoRegistrado, 1)} kg de lastre × ${m.topReps}` : `${fmt(m.pesoRegistrado, 1)} kg × ${m.topReps}`
 const signo = (x: number, d = 2): string => (Number.isFinite(x) ? `${x >= 0 ? '+' : ''}${x.toFixed(d)}` : '—')
 const fechaCorta = (iso: string): string => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}` }
 
@@ -307,7 +342,9 @@ function TarjetaMusculo({ m, abierto, onToggle }: { m: InformeMusculo; abierto: 
             <p className="text-[11px] text-zinc-400 mt-1">{motivoBaja}</p>
           )}
           {estancados.length > 0 && (
-            <p className="text-[11px] text-amber-400/90 mt-1">Sin récord en las últimas 6 sesiones: {estancados.map((e) => e.nombre).join(', ')}</p>
+            <p className="text-[11px] text-amber-400/90 mt-1">
+              Sin récord en las últimas {MEAM_CONFIG.no_improvement_exposures} sesiones: {estancados.map((e) => e.mejorMarca ? `${e.nombre} (a batir: ${marcaLegible(e.mejorMarca)} del ${fechaCorta(e.mejorMarca.fecha)}, mejor de las ${e.mejorMarca.nPrevias} anteriores)` : e.nombre).join('; ')}
+            </p>
           )}
         </div>
       </div>
@@ -363,7 +400,7 @@ function Detalle({ m }: { m: InformeMusculo }) {
         <ul className="divide-y divide-zinc-800/60">
           {m.ejercicios.map((e) => <FilaEjercicio key={e.key} e={e} />)}
         </ul>
-        <p className="text-[11px] text-zinc-500 mt-2">«Mínimo detectable»: cambios más pequeños que ese valor se pierden dentro del ruido de ese ejercicio. Para afinar: mismo rango de repeticiones, anota el RIR de la serie fuerte y no cambies de variante.</p>
+        <p className="text-[11px] text-zinc-500 mt-2">Las sesiones cuentan desde el bloque actual: un parón de más de 6 semanas o un cambio de máquina o de forma de apuntar los kilos abre un bloque nuevo, y el histórico anterior deja de compararse. «Mínimo detectable»: cambios más pequeños que ese valor se pierden dentro del ruido de ese ejercicio. Para afinar: mismo rango de repeticiones, anota el RIR de la serie fuerte y no cambies de variante.</p>
       </div>
     </div>
   )
@@ -383,7 +420,7 @@ function FilaEjercicio({ e }: { e: InformeEjercicio }) {
         <span>T {signo(e.T)} ({claro})</span>
         <span>fuerza estimada {fmt(e.e1rmActual, 1)} kg</span>
         <span>mínimo detectable {fmt(e.mdsKgMes, 1)} kg/mes</span>
-        <span>{e.nExposiciones} sesiones · {TIER[e.tier] ?? legible(e.tier)}</span>
+        <span>{e.nExposiciones} sesiones{e.bloqueDesde ? ` desde el ${fechaCorta(e.bloqueDesde)}` : ''} · {TIER[e.tier] ?? legible(e.tier)}</span>
         <span>{CALIDAD[e.calidadTemporal] ?? legible(e.calidadTemporal)}</span>
         {e.estrato && <span>{estratoLegible(e.estrato)}</span>}
         {Number.isFinite(e.TLong) && <span>26 semanas: T {signo(e.TLong)}</span>}
