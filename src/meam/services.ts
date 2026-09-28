@@ -82,7 +82,8 @@ export async function guardarSnapshots(inf: InformeMeam): Promise<number> {
     const ya = new Set((existentes ?? []).map((r: Record<string, unknown>) => `${r.musculo}|${r.input_hash}`))
     const nuevas = inf.musculos.filter((m) => !ya.has(`${m.musculo}|${m.inputHash}`)).map((m) => filaDe(id, inf, m))
     if (nuevas.length === 0) return 0
-    const { error: e2 } = await supabase.from('meam_snapshots').insert(nuevas)
+    // upsert con ignoreDuplicates: dos dispositivos calculando la misma semana no chocan (UNIQUE de la tabla; nunca UPDATE)
+    const { error: e2 } = await supabase.from('meam_snapshots').upsert(nuevas, { onConflict: 'usuario_id,semana,musculo,model_version,config_version,input_hash', ignoreDuplicates: true })
     if (e2) throw e2
     return nuevas.length
   } catch (e) {

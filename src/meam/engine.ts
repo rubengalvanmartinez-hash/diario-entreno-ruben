@@ -6,7 +6,7 @@
 import { MEAM_CONFIG as CFG } from './config'
 import { NaN_, isFin, mean, median } from './mathx'
 import {
-  type Exposure, type VariantStats, type ClusterStat, type MuscleStat, type AdaptationState, type RecoveryState, type RecoveryInputs, type UserContext,
+  type Exposure, type VariantStats, type ForecastError, type ClusterStat, type MuscleStat, type AdaptationState, type RecoveryState, type RecoveryInputs, type UserContext,
   rollingOriginErrors, segments, variantStats, stateWindowResiduals, strataFor, combineCluster, muscleStat, initialAdaptation, recoveryState,
   stepAdaptation, stepRecovery, reductionEvents, robustScale, pooledRho1, dedupeSameDay, pairwiseClusterCorr, trendHw,
 } from './core'
@@ -45,20 +45,48 @@ export function segmentOf(sub: readonly Exposure[], vd: VariantDef): Exposure[] 
   return segs[segs.length - 1].map((i) => sub[i])
 }
 
+/** Cantidades por variante y corte que el contexto de usuario reutiliza (caché opcional; auditoría 6, C1). */
+interface PoolVariantStats { fc: number | null; res: number | null; resid: number[] | null; ro: ForecastError[] | null; n: number; first_t: number }
+export type ContextCache = Map<string, PoolVariantStats>
+
+function poolVariantAt(vid: string, vd: VariantDef, cutoff: number, exclusions: readonly NoiseExclusion[], cache?: ContextCache): PoolVariantStats {
+  // clave: las exclusiones de una variante solo se crean en la ejecución de su músculo y solo se añaden ⇒ (vid, corte, nº aplicable) identifica el prefijo
+  const nEx = exclusions.filter((ne) => ne.vid === vid && ne.from_cutoff < cutoff).length
+  const key = `${vid}|${cutoff}|${nEx}`
+  const hit = cache?.get(key)
+  if (hit) return hit
+  const seg = segmentOf(prefix(vd, vid, cutoff, exclusions), vd)
+  const out: PoolVariantStats = { fc: null, res: null, resid: null, ro: null, n: seg.length, first_t: seg.length ? seg[0].t : NaN_ }
+  // incremental: el último cálculo de esta variante con el mismo nº de exclusiones (corte anterior) si es prefijo del segmento actual
+  const last = cache?.get(`${vid}|last|${nEx}`)
+  if (seg.length >= 3) {
+    const ro = rollingOriginErrors(seg, last && last.ro ? { n: last.n, errors: last.ro, first_t: last.first_t } : null)
+    out.ro = ro
+    if (seg.length > CFG.M_min) {
+      const e = ro.filter((fe) => fe.valid && fe.k >= CFG.fc_min_train).map((fe) => fe.e)
+      if (e.length >= CFG.prior_min_n_err) { const sc = robustScale(e); if (sc > 0) out.fc = sc }
+      const res = stateWindowResiduals(seg)
+      if (res.length >= CFG.prior_min_n_err) {
+        const sc = robustScale(res)
+        if (sc > 0) out.res = sc
+        out.resid = res
+      }
+    }
+  }
+  cache?.set(key, out)
+  cache?.set(`${vid}|last|${nEx}`, out)
+  return out
+}
+
 /** Prior y autocorrelación agrupados por USUARIO (todas sus variantes), con datos < cutoff. */
-export function userContextAt(pool: ReadonlyMap<string, VariantDef>, cutoff: number, exclusions: readonly NoiseExclusion[], equipmentClass: EquipmentClass, rhoFixed?: number | null): UserContext {
+export function userContextAt(pool: ReadonlyMap<string, VariantDef>, cutoff: number, exclusions: readonly NoiseExclusion[], equipmentClass: EquipmentClass, rhoFixed?: number | null, cache?: ContextCache): UserContext {
   const resClass: number[] = [], resAll: number[] = [], fcAll: number[] = [], errSeries: number[][] = []
   for (const [vid, vd] of pool) {
-    const seg = segmentOf(prefix(vd, vid, cutoff, exclusions), vd)
-    if (seg.length <= CFG.M_min) continue
-    const ro = rollingOriginErrors(seg)
-    const e = ro.filter((fe) => fe.valid && fe.k >= CFG.fc_min_train).map((fe) => fe.e)
-    if (e.length >= CFG.prior_min_n_err) { const s = robustScale(e); if (s > 0) fcAll.push(s) }
-    const res = stateWindowResiduals(seg)
-    if (res.length >= CFG.prior_min_n_err) {
-      const s = robustScale(res)
-      if (s > 0) { resAll.push(s); if (vd.equipment_class === equipmentClass) resClass.push(s) }
-      errSeries.push(res)
+    const pv = poolVariantAt(vid, vd, cutoff, exclusions, cache)
+    if (pv.fc !== null) fcAll.push(pv.fc)
+    if (pv.resid !== null) {
+      if (pv.res !== null) { resAll.push(pv.res); if (vd.equipment_class === equipmentClass) resClass.push(pv.res) }
+      errSeries.push(pv.resid)
     }
   }
   const prior = resClass.length ? median(resClass) : resAll.length ? median(resAll) : CFG.prior_default_log[equipmentClass]
@@ -80,7 +108,7 @@ export interface VariantEvidence {
   T: number; slope_pct_wk: number; lower_pct_wk: number; upper_pct_wk: number; mds_pct_wk: number; D: number; DCT_pct: number
   level_recent: number; base_median: number; n_recent_below: number; stratum: string; temporal_quality: string; time_span_weeks: number
   median_gap_days: number; gap_cv: number; T_long: number; long_slope_pct_wk: number; long_lower_pct_wk: number; long_upper_pct_wk: number
-  flags: string[]; last_t: number
+  flags: string[]; last_t: number; interruption_recent: boolean
 }
 
 export interface SnapshotEvidence {
@@ -106,6 +134,8 @@ export interface RunOptions {
   rhoFixed?: number | null
   /** todas las variantes del usuario (prior y ρ); por defecto las del músculo */
   pool?: ReadonlyMap<string, VariantDef>
+  /** caché compartida entre músculos de las cantidades por variante y corte (rendimiento) */
+  ctxCache?: ContextCache
 }
 
 function coverWeeks(exclusions: readonly NoiseExclusion[], vid: string, cutoff: number, extra?: [number, number]): number {
@@ -136,8 +166,11 @@ export function runSnapshots(variants: ReadonlyMap<string, VariantDef>, opts: Ru
       const vd = variants.get(vid)!
       const seg = segmentOf(prefix(vd, vid, cutoff, exclusions), vd)
       if (seg.length < 3) continue
-      const ctx = userContextAt(pool, cutoff, exclusions, vd.equipment_class, opts.rhoFixed)
-      perVar.set(vid, variantStats(seg, ctx)); segs.set(vid, seg)
+      const ctx = userContextAt(pool, cutoff, exclusions, vd.equipment_class, opts.rhoFixed, opts.ctxCache)
+      const nEx = exclusions.filter((ne) => ne.vid === vid && ne.from_cutoff < cutoff).length
+      const cached = opts.ctxCache?.get(`${vid}|${cutoff}|${nEx}`)
+      const ro = cached && cached.ro && cached.n === seg.length && cached.first_t === seg[0].t ? cached.ro : null
+      perVar.set(vid, variantStats(seg, ctx, ro)); segs.set(vid, seg)
     }
     let maxT = -Infinity; for (const s of perVar.values()) maxT = Math.max(maxT, s.last_t)
     const hasNew = maxT > lastMaxT; lastMaxT = Math.max(lastMaxT, maxT)
@@ -191,15 +224,16 @@ export function runSnapshots(variants: ReadonlyMap<string, VariantDef>, opts: Ru
       if (coverWeeks(exclusions, rec.driver_vid, cutoff, [t0, t1]) > CFG.exclusion_max_weeks_52w) exclFlags = new Set(['EXCLUSION_EXCESIVA'])
       else exclusions.push({ vid: rec.driver_vid, t0, t1, from_cutoff: cutoff })
     }
+    // bandera no pegajosa: persiste mientras no quede sitio para un episodio típico bajo el tope (auditoría 6)
     if (exclFlags.size && rec.driver_vid) {
-      if (coverWeeks(exclusions, rec.driver_vid, cutoff) <= CFG.exclusion_max_weeks_52w) exclFlags = new Set()
+      if (coverWeeks(exclusions, rec.driver_vid, cutoff) + CFG.exclusion_typical_episode_weeks <= CFG.exclusion_max_weeks_52w) exclFlags = new Set()
     }
     const nExpTotal = [...perVar.values()].reduce((a, s) => a + s.n_exposures, 0)
     ad = stepAdaptation(ad, ms, nExpTotal, hasNew, inconclusive, rec.state === 'FATIGA_APOYADA')
     const d0 = drivers.length ? drivers[0] : perVar.size ? [...perVar.values()][0] : null
     const allFlags = new Set<string>(); for (const s of perVar.values()) for (const f of s.flags) allFlags.add(f); for (const f of exclFlags) allFlags.add(f)
     const clusterSlopes = [...clusters.values()].filter((c): c is ClusterStat => c !== null).map((c) => c.slope)
-    const ctxPool = perVar.size ? userContextAt(pool, cutoff, exclusions, 'compound_free', opts.rhoFixed) : null
+    const ctxPool = perVar.size ? userContextAt(pool, cutoff, exclusions, 'compound_free', opts.rhoFixed, opts.ctxCache) : null
     const rhoUsed = opts.rhoFixed !== undefined && opts.rhoFixed !== null ? opts.rhoFixed : ctxPool ? ctxPool.rho1 : 0
     const evidence: SnapshotEvidence = {
       cutoff,
@@ -211,7 +245,7 @@ export function runSnapshots(variants: ReadonlyMap<string, VariantDef>, opts: Ru
           mds_pct_wk: s.mds_pct_wk, D: s.D, DCT_pct: s.DCT * 100, level_recent: s.level_recent, base_median: s.base_median, n_recent_below: s.n_recent_below,
           stratum: s.stratum, temporal_quality: s.temporal_quality, time_span_weeks: s.time_span_weeks, median_gap_days: s.median_gap_days, gap_cv: s.gap_cv,
           T_long: s.T_long, long_slope_pct_wk: s.trend_long ? s.trend_long.slope * 100 : NaN_, long_lower_pct_wk: s.trend_long ? s.trend_long.lower * 100 : NaN_,
-          long_upper_pct_wk: s.trend_long ? s.trend_long.upper * 100 : NaN_, flags: [...s.flags], last_t: s.last_t,
+          long_upper_pct_wk: s.trend_long ? s.trend_long.upper * 100 : NaN_, flags: [...s.flags], last_t: s.last_t, interruption_recent: s.interruption_recent,
         }
       }),
       clusters: Object.fromEntries([...clusters.entries()].map(([cid, c]) => [cid, c ? {

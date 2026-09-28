@@ -9,13 +9,13 @@
 ALTER TABLE entrenos ADD COLUMN IF NOT EXISTS tipo_sesion text
   CHECK (tipo_sesion IS NULL OR tipo_sesion IN ('normal', 'deload', 'rehab', 'test'));
 
--- 2) Una fila por serie: elimina duplicados exactos (mismas 4 claves) conservando la más reciente antes de crear el índice.
---    El motor deduplica además por día y variante, pero el índice evita que la doble escritura vuelva a ocurrir.
-DELETE FROM entrenos a
-USING entrenos b
-WHERE a.usuario_id = b.usuario_id AND a.sesion_id = b.sesion_id AND a.ejercicio = b.ejercicio AND a.serie = b.serie
-  AND a.ctid < b.ctid;
-CREATE UNIQUE INDEX IF NOT EXISTS entrenos_serie_unica ON entrenos (usuario_id, sesion_id, ejercicio, serie);
+-- 2) Duplicados. NO se crea índice único ni se borra nada automáticamente: la app permite el mismo ejercicio dos veces en una
+--    sesión (números de serie repetidos) y la sincronización hace DELETE + INSERT no atómicos, así que un índice único podría
+--    dejar sesiones sin filas (auditoría 6, C2). El motor MEAM deduplica por día y variante al calcular.
+--    Consulta de diagnóstico (solo lectura): filas con las mismas 4 claves y contenido distinto.
+--    SELECT usuario_id, sesion_id, ejercicio, serie, count(*)
+--      FROM entrenos GROUP BY 1, 2, 3, 4
+--    HAVING count(*) > 1 AND count(DISTINCT (reps, peso_kg, etiqueta)) > 1;
 
 -- 3) Mapa de variantes revisado por el usuario (correcciones al mapa por palabras clave de src/meam/variants.ts).
 CREATE TABLE IF NOT EXISTS meam_variants (

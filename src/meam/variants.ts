@@ -38,12 +38,14 @@ interface Regla { claves: string[]; musculo: MeamMuscle; cluster: string; equipm
 /** Orden de evaluación: gana la primera regla que casa (resuelve ambigüedades como "jalón al pecho" o "curl femoral"). */
 const REGLAS: Regla[] = [
   { claves: ['abdominal', 'abdomen', 'oblicuo', 'plancha', 'crunch', 'core', 'rueda', 'elevacion de piernas'], musculo: 'abdomen', cluster: 'ABDOMEN', equipment: 'isolation_machine', aislamiento: true },
-  { claves: ['femoral', 'isquio'], musculo: 'femoral_gluteo', cluster: 'FEMORAL', equipment: 'isolation_machine', aislamiento: true },
+  { claves: ['femoral', 'isquio', 'nordico', 'nórdico'], musculo: 'femoral_gluteo', cluster: 'FEMORAL', equipment: 'isolation_machine', aislamiento: true },
   { claves: ['hip thrust', 'hiptrust', 'gluteo', 'puente'], musculo: 'femoral_gluteo', cluster: 'EXTENSION_CADERA', equipment: 'compound_free', aislamiento: false },
-  { claves: ['gemelo', 'pantorrilla', 'soleo'], musculo: 'gemelo', cluster: 'GEMELO', equipment: 'isolation_machine', aislamiento: true },
+  { claves: ['gemelo', 'pantorrilla', 'soleo', 'talon', 'talones'], musculo: 'gemelo', cluster: 'GEMELO', equipment: 'isolation_machine', aislamiento: true },
+  { claves: ['menton', 'remo alto'], musculo: 'hombro', cluster: 'ELEVACION', equipment: 'compound_free', aislamiento: false },
   { claves: ['abductor', 'aductor'], musculo: 'femoral_gluteo', cluster: 'ABD_ADD', equipment: 'isolation_machine', aislamiento: true, role: 'SECONDARY' },
   { claves: ['prensa', 'sentadilla', 'hack', 'jaca', 'zancada', 'bulgara', 'step', 'cajon', 'sillon', 'extension de cuadriceps', 'cuadriceps', 'pierna'], musculo: 'cuadriceps', cluster: 'SENTADILLA_PRENSA', equipment: 'compound_free', aislamiento: false },
-  { claves: ['jalon', 'dominada', 'pull up', 'pullup'], musculo: 'espalda', cluster: 'TRACCION_VERTICAL', equipment: 'compound_free', aislamiento: false },
+  { claves: ['dominada', 'pull up', 'pullup', 'chin up'], musculo: 'espalda', cluster: 'TRACCION_VERTICAL', equipment: 'weighted_bodyweight', aislamiento: false },
+  { claves: ['jalon'], musculo: 'espalda', cluster: 'TRACCION_VERTICAL', equipment: 'compound_free', aislamiento: false },
   { claves: ['remo', 'pull down', 'dorsal'], musculo: 'espalda', cluster: 'REMO', equipment: 'compound_free', aislamiento: false },
   { claves: ['peso muerto', 'hiperextension', 'lumbar', 'buenos dias'], musculo: 'espalda', cluster: 'BISAGRA', equipment: 'compound_free', aislamiento: false },
   { claves: ['encogimiento', 'trapecio'], musculo: 'espalda', cluster: 'TRAPECIO', equipment: 'isolation_machine', aislamiento: true, role: 'SECONDARY' },
@@ -54,7 +56,8 @@ const REGLAS: Regla[] = [
   { claves: ['biceps', 'curl', 'martillo', 'antebrazo', 'muneca'], musculo: 'biceps', cluster: 'BICEPS', equipment: 'isolation_machine', aislamiento: true },
   { claves: ['inclinado', 'inclinada'], musculo: 'pecho', cluster: 'PRESS_INCLINADO', equipment: 'compound_free', aislamiento: false },
   { claves: ['cruces', 'mariposa', 'apertura', 'pull over', 'pullover', 'pec deck', 'contractor'], musculo: 'pecho', cluster: 'APERTURA', equipment: 'isolation_machine', aislamiento: true },
-  { claves: ['pecho', 'banca', 'pectoral', 'fondos', 'press'], musculo: 'pecho', cluster: 'PRESS_HORIZONTAL', equipment: 'compound_free', aislamiento: false },
+  { claves: ['fondos', 'dips'], musculo: 'pecho', cluster: 'PRESS_HORIZONTAL', equipment: 'weighted_bodyweight', aislamiento: false },
+  { claves: ['pecho', 'banca', 'pectoral', 'press'], musculo: 'pecho', cluster: 'PRESS_HORIZONTAL', equipment: 'compound_free', aislamiento: false },
 ]
 
 /** Asignación por palabras clave (sin base de datos). */
@@ -64,7 +67,7 @@ export function inferirVariante(nombre: string, esAsistencia = false): VariantMe
   for (const r of REGLAS) {
     if (r.claves.some((c) => n.includes(c))) {
       return { key, nombre, musculo: r.musculo, cluster: r.cluster, role: r.role ?? 'DIRECT', equipment: esAsistencia ? 'assisted' : r.equipment,
-        esAsistencia, aislamiento: r.aislamiento, inferido: true }
+        esAsistencia, aislamiento: r.aislamiento, inferido: true }   // 'weighted_bodyweight' (dominadas/fondos sin asistencia): W = BW_ref + lastre
     }
   }
   return { key, nombre, musculo: 'otros', cluster: 'OTROS', role: 'DIRECT', equipment: esAsistencia ? 'assisted' : 'compound_free', esAsistencia, aislamiento: false, inferido: true }

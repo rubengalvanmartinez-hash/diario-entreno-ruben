@@ -3,8 +3,8 @@
  * Ninguna constante fuera de aquí. Toda cifra tiene su justificación en MEAM_v2_3_especificacion.md (§4).
  */
 export const MEAM_CONFIG = {
-  config_version: '2.3.0-rc',
-  model_version: 'meam-ts-2.3.0',
+  config_version: '2.3.1-rc',
+  model_version: 'meam-ts-2.3.1',
   // P0/P1 rendimiento
   e1rm_reps_min: 1, e1rm_reps_max: 12, e1rm_reps_max_isolation: 20, e1rm_rir_known_max: 3, rir_adjust_cap: 3,
   rep_bands: [[1, 5], [6, 8], [9, 12], [13, 20]] as ReadonlyArray<readonly [number, number]>,
@@ -63,7 +63,7 @@ export const MEAM_CONFIG = {
   reduction_lookback_days: 14, reduction_volume_ratio: 0.70, post_reduction_min_exposures: 2,
   recovery_exit_snapshots: 2, suspect_max_weeks: 6, alert_ttl_days: 14,
   noatr_max_weeks: 8, apoyada_max_weeks: 8,
-  exclusion_max_weeks_52w: 10.0,
+  exclusion_max_weeks_52w: 10.0, exclusion_typical_episode_weeks: 4.0,
   context_percentile: 80, context_window_weeks: 12, context_pain_min: 2, volume_high_percentile: 70, volume_low_percentile: 40, volume_very_low_percentile: 25,
   no_improvement_exposures: 6,
   // calibración

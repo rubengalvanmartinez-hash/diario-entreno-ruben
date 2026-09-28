@@ -322,8 +322,10 @@ async function insertarEntrenos(rows: Record<string, unknown>[], origen: string)
   // Columnas opcionales que pueden no existir todavía (SQL pendiente): gimnasio (v2.5.0) y tipo_sesion (v2.8.0 MEAM).
   // Se reintenta quitando la columna que falte (una o las dos).
   if (error.code === 'PGRST204' || /gimnasio|tipo_sesion/i.test(msg)) {
-    const faltaTipo = /tipo_sesion/i.test(msg) || error.code === 'PGRST204'
-    const faltaGim  = /gimnasio/i.test(msg)
+    // PGRST204 cita la columna que falta ("Could not find the 'tipo_sesion' column…"); si no cita ninguna, quitar las dos
+    const citaAlguna = /gimnasio|tipo_sesion/i.test(msg)
+    const faltaTipo = /tipo_sesion/i.test(msg) || !citaAlguna
+    const faltaGim  = /gimnasio/i.test(msg) || !citaAlguna
     let reducidas = rows
     if (faltaTipo) {
       console.warn(`[Supabase] ${origen}: la columna tipo_sesion no existe aún — reintentando sin ella (pendiente ejecutar el SQL de v2.8.0 MEAM)`)
@@ -486,6 +488,7 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
       })
     }
     const s = sesionMap.get(row.sesion_id)!
+    if (!s.tipoSesion && (row.tipo_sesion === 'deload' || row.tipo_sesion === 'rehab' || row.tipo_sesion === 'test')) s.tipoSesion = row.tipo_sesion
     if (!s.ejercicios.has(row.ejercicio)) {
       s.ejercicios.set(row.ejercicio, { rows: [] })
     }

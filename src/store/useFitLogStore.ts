@@ -695,7 +695,15 @@ export const useFitLogStore = create<FitLogStore>()(
           const localPending = s.historialSesiones.filter(
             (ses) => !ses.sincronizado && !remoteIds.has(ses.id),
           )
-          const merged = [...localPending, ...sesiones]
+          // Sesiones locales pendientes que el remoto ya conoce: conservar el tipo de sesión marcado localmente (MEAM) hasta que
+          // se sincronice; si no, el pull cada 5 s lo pisaría (auditoría 6, C3)
+          const localPorId = new Map(s.historialSesiones.filter((ses) => !ses.sincronizado && remoteIds.has(ses.id)).map((ses) => [ses.id, ses]))
+          const remotas = sesiones.map((ses) => {
+            const loc = localPorId.get(ses.id)
+            if (!loc || loc.tipoSesion === ses.tipoSesion) return ses
+            return loc.tipoSesion ? { ...ses, tipoSesion: loc.tipoSesion, sincronizado: false } : ses
+          })
+          const merged = [...localPending, ...remotas]
           console.log(`[Store] actualizarHistorialRemoto: local=${s.historialSesiones.length} remoto=${sesiones.length} resultado=${merged.length}`)
           return { historialSesiones: merged }
         })

@@ -6,7 +6,7 @@
 import type { RegistroPeso } from '../types/models'
 import { MEAM_CONFIG as CFG } from './config'
 import { theilSen } from './core'
-import { runSnapshots, variantDef, mdsKgPerMonth, type VariantDef, type SnapshotRow, type VariantEvidence } from './engine'
+import { runSnapshots, variantDef, mdsKgPerMonth, type VariantDef, type SnapshotRow, type VariantEvidence, type ContextCache } from './engine'
 import { derivarExposiciones, percentilVolumen, reduccionesDeVolumen, lunesDeIso, diasEntre, isoAddDays, type SesionConTipo, type DerivedVariant, type SemanaVolumen } from './exposure'
 import { MUSCULOS_MEAM, MUSCULOS_ORDEN, type MeamMuscle, type VariantMeta } from './variants'
 
@@ -83,7 +83,9 @@ function confianzaDe(row: SnapshotRow, rhoCalibrado: boolean): Confianza {
   const vars = ev.variants
   const tiers = vars.map((v) => v.tier)
   const soloProvisional = tiers.length > 0 && tiers.every((t) => t === 'PROVISIONAL' || t === 'NONE')
-  const interrupcion = row.flags.includes('POST_INTERRUPCION') || vars.some((v) => v.flags.includes('CAMBIO_DE_ESTRATO_PENDIENTE'))
+  // banderas exactas: POST_INTERRUPCION_SIN_CAMBIO_DE_NIVEL persiste todo el segmento y no es una interrupción reciente (auditoría 6)
+  const flags = new Set(row.flags ? row.flags.split(',') : [])
+  const interrupcion = flags.has('POST_INTERRUPCION') || flags.has('CAMBIO_DE_ESTRATO_PENDIENTE') || vars.some((v) => v.interruption_recent)
   if (soloProvisional || ev.muscle.contradiction || interrupcion || !rhoCalibrado) return 'BAJA'
   const dir = row.adaptation === 'PROGRESANDO' ? 1 : (row.adaptation === 'DECLINANDO' || row.adaptation === 'REGRESION_PROBABLE') ? -1 : 0
   const clustersDetectando = Object.values(ev.clusters).filter((c) => c && (dir > 0 ? c.lower_pct_wk > 0 : dir < 0 ? c.upper_pct_wk < 0 : false)).length
@@ -145,6 +147,17 @@ export interface OpcionesMeam {
   ultimosCortes?: number
 }
 
+/** Confianza con histéresis (P14): la categoría solo cambia cuando la nueva se mantiene 2 snapshots seguidos. */
+function confianzaConHisteresis(rows: readonly SnapshotRow[]): Confianza {
+  let actual: Confianza = 'INSUFICIENTE'; let candidata: Confianza | null = null
+  for (const r of rows) {
+    const c = confianzaDe(r, r.evidence.rho_calibrated)
+    if (c === actual) { candidata = null; continue }
+    if (candidata === c) { actual = c; candidata = null } else candidata = c
+  }
+  return actual
+}
+
 /** Ejecuta MEAM sobre el historial completo del usuario y devuelve el informe por músculo. */
 export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyMap<string, VariantMeta>, pesos: readonly RegistroPeso[], opts: OpcionesMeam = {}): InformeMeam {
   const hoy = opts.hoy ?? new Date().toISOString().slice(0, 10)
@@ -153,12 +166,15 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
   const fase: InformeMeam['faseNutricional'] = !Number.isFinite(pesoSlope) ? 'desconocida' : pesoSlope <= -0.25 ? 'deficit' : pesoSlope >= 0.25 ? 'superavit' : 'mantenimiento'
   // pool de todas las variantes del usuario (prior y ρ agrupados)
   const pool = new Map<string, VariantDef>()
-  for (const [key, dv] of der.variantes) if (dv.exps.length >= 3) pool.set(key, variantDef(dv.exps, dv.meta.cluster, dv.meta.equipment, dv.meta.role))
-  // cortes: cada lunes desde la semana 6 hasta el próximo lunes posterior a hoy (el corte incluye t < corte)
-  const proximoLunes = isoAddDays(lunesDeIso(hoy), 7)
-  const ultimoCorte = Math.round(diasEntre(der.epoch, proximoLunes) / 7)
-  let cortes = Array.from({ length: Math.max(0, ultimoCorte - 6 + 1) }, (_, i) => 6 + i)
+  for (const [key, dv] of der.variantes) if (dv.exps.length >= 3) pool.set(key, variantDef(dv.exps, dv.meta.cluster, dv.meta.equipment, dv.meta.role, dv.rupturasPropuestas))
+  // cortes: cada lunes desde la semana 6 hasta el lunes de la semana en curso (solo semanas completas: el corte incluye t < corte;
+  // la semana parcial se evalúa el lunes siguiente — auditoría 6, C4)
+  const lunesActual = lunesDeIso(hoy)
+  const ultimoCorte = Math.round(diasEntre(der.epoch, lunesActual) / 7)
+  const cortesTodos = Array.from({ length: Math.max(0, ultimoCorte - 6 + 1) }, (_, i) => 6 + i)
+  const cortes = opts.ultimosCortes ? cortesTodos.slice(-opts.ultimosCortes) : cortesTodos
   const corteIso = (c: number): string => isoAddDays(der.epoch, c * 7)
+  const ctxCache: ContextCache = new Map()
   const musculos: InformeMusculo[] = []
   const porMusculo = new Map<MeamMuscle, DerivedVariant[]>()
   for (const dv of der.variantes.values()) { if (!porMusculo.has(dv.meta.musculo)) porMusculo.set(dv.meta.musculo, []); porMusculo.get(dv.meta.musculo)!.push(dv) }
@@ -166,7 +182,7 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
     const dvs = (porMusculo.get(musculo) ?? []).filter((dv) => dv.exps.length >= 3)
     if (dvs.length === 0 || musculo === 'otros') continue
     const variants = new Map<string, VariantDef>()
-    for (const dv of dvs) variants.set(dv.meta.key, variantDef(dv.exps, dv.meta.cluster, dv.meta.equipment, dv.meta.role))
+    for (const dv of dvs) variants.set(dv.meta.key, variantDef(dv.exps, dv.meta.cluster, dv.meta.equipment, dv.meta.role, dv.rupturasPropuestas))
     const semanasVol: SemanaVolumen[] = der.volumenPorMusculo.get(musculo) ?? []
     // contexto alto por volumen: la semana previa al corte ≥ P70 del histórico personal (RPE/sueño/estrés no están en la app)
     const ctxAlto = new Set<number>()
@@ -178,9 +194,8 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
         if (percentilVolumen(previas, media) >= CFG.volume_high_percentile) ctxAlto.add(c)
       }
     }
-    const reducciones = reduccionesDeVolumen(semanasVol)
-    if (opts.ultimosCortes) cortes = cortes.slice(-opts.ultimosCortes)
-    const rows = runSnapshots(variants, { cutoffs: cortes, contextHighCutoffs: ctxAlto, volumeReductionTs: reducciones, rhoFixed: opts.rhoFixed, pool })
+    const reducciones = reduccionesDeVolumen(semanasVol, ultimoCorte)
+    const rows = runSnapshots(variants, { cutoffs: cortes, contextHighCutoffs: ctxAlto, volumeReductionTs: reducciones, rhoFixed: opts.rhoFixed, pool, ctxCache })
     if (rows.length === 0) continue
     const fila = rows[rows.length - 1]
     const corte = fila.week
@@ -190,7 +205,7 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
     const volPct = percentilVolumen(previas, volSem)
     const sesionesUlt3 = new Set(dvs.flatMap((dv) => dv.extras.filter((x) => x.t >= corte - 3 && x.t < corte).map((x) => x.sesionId))).size
     const rhoCal = fila.evidence.rho_calibrated
-    const conf = confianzaDe(fila, rhoCal)
+    const conf = confianzaConHisteresis(rows)
     const sinMejora = dvs.some((dv) => dv.sinMejoraEn6)
     const [accionTitulo, accionTexto] = accionDe(fila, conf, sinMejora, volPct, fase, pesoSlope, ctxAlto.has(corte))
     const ev = fila.evidence

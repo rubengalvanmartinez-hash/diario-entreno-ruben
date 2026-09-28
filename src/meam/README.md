@@ -1,4 +1,4 @@
-# MEAM — Motor de Evidencia de Adaptación Muscular (v2.3.0-rc) en la app
+# MEAM — Motor de Evidencia de Adaptación Muscular (v2.3.1-rc) en la app
 
 Port a TypeScript de la implementación de referencia Python (`meam_core.py`, `meam_engine.py`), auditada externamente
 (5 auditorías + contraopinión; ver `MEAM_v2_3_especificacion.md` en el expediente del proyecto). El motor mide **rendimiento**
@@ -16,6 +16,7 @@ Port a TypeScript de la implementación de referencia Python (`meam_core.py`, `m
 | `variants.ts` | Mapa ejercicio → músculo/cluster/rol/equipo por palabras clave + correcciones de `meam_variants` | — |
 | `run.ts` | `ejecutarMeam`: informe por músculo (estado, confianza P14, acción P10, texto, evidencia, `input_hash`) | — |
 | `services.ts` | Supabase: `meam_variants`, `meam_snapshots` (append-only) | — |
+| `meam.worker.ts` | Web Worker: el cálculo (≈1 s en Node para 18 meses; 3–6× en móvil) va fuera del hilo principal y solo se repite si cambia el contenido del historial | — |
 | `../pages/MeamPage.tsx` | Pantalla «Evidencia de adaptación» (ruta `/meam`, desde Tendencias) | — |
 
 ## Verificación
@@ -31,8 +32,8 @@ Igualdad exigida: estados, etiquetas, banderas y tiers exactos; T, D, σ, ρ, MD
 
 ## Base de datos
 
-Ejecutar `supabase_v2.8.0_meam.sql` una vez: `entrenos.tipo_sesion`, índice único `(usuario_id, sesion_id, ejercicio, serie)`
-(borra antes duplicados exactos), `meam_variants` y `meam_snapshots`. La app funciona sin el SQL (reintenta sin columnas nuevas y avisa por consola).
+Ejecutar `supabase_v2.8.0_meam.sql` una vez: `entrenos.tipo_sesion`, `meam_variants` y `meam_snapshots`. Sin índices únicos ni borrados
+(la app permite el mismo ejercicio dos veces por sesión; el motor deduplica por día). La app funciona sin el SQL (reintenta sin columnas nuevas y avisa por consola).
 
 ## Decisiones fijadas en esta versión
 
@@ -41,7 +42,11 @@ Ejecutar `supabase_v2.8.0_meam.sql` una vez: `entrenos.tipo_sesion`, índice ún
 - Exclusiones de ruido solo por episodio confirmado (evento exógeno + rebote), con tope de 10 semanas/52 (`EXCLUSION_EXCESIVA`).
 - Contexto de carga alta: en la app solo hay volumen (≥ P70 personal); RPE/sueño/estrés/dolor no se registran todavía.
 - Confianza BAJA y sin acción mientras `RUIDO_NO_CALIBRADO` (hacen falta ≥ 3 ejercicios con ≥ 20 exposiciones en ventana).
-- `deload_inferido`: series de trabajo ≤ 60 % y carga top ≤ 90 % de la mediana de las 4 sesiones previas del ejercicio; una descarga no se evalúa como errata.
+- `deload_inferido`: series de trabajo ≤ 60 % y carga top ≤ 90 % de la mediana de las sesiones normales de los 28 días previos (mín. 3); una descarga no se evalúa como errata.
+- Errata: |ln e1RM − mediana de las 5 previas| > 0,22 ⇒ excluida; **tres seguidas del mismo signo = nuevo nivel** (se readmiten, ruptura de protocolo propuesta, referencia nueva).
+- Dominadas/fondos sin asistencia: `weighted_bodyweight` (W = BW_ref + lastre; a 0 kg cuenta el peso corporal); asistidos: W = BW_ref − asistencia; BW_ref = mediana de 7 d (o último ≤ 21 d).
+- Cortes solo de semanas completas (lunes en curso); volumen, reducciones y contexto no usan la semana parcial; confianza con histéresis de 2 snapshots.
+- Caché por (variante, corte, exclusiones) y errores rolling-origin incrementales dentro de una ejecución: idéntico al cálculo completo (comprobado con los 812 snapshots de las dos baterías).
 
 ## Pendiente (F3: backtest con el histórico real)
 

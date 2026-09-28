@@ -248,12 +248,22 @@ export function segments(exps: readonly Exposure[], protocolBreaks: readonly num
 
 export interface ForecastError { k: number; e: number; valid: boolean; horizon_weeks: number }
 
-/** Errores 1-paso causales: el error k solo depende de exposiciones ≤ k. */
-export function rollingOriginErrors(exps: readonly Exposure[]): ForecastError[] {
+/**
+ * Errores 1-paso causales: el error k solo depende de exposiciones ≤ k (y de sus estratos, que son definitivos una vez
+ * llegan las 3 exposiciones siguientes). `prev` permite el cálculo incremental: si `prev.exps` es prefijo de `exps`
+ * (mismo segmento), se reutilizan los errores con k < prev.n − 4 y se recalculan los demás. Idéntico al cálculo completo.
+ */
+export function rollingOriginErrors(exps: readonly Exposure[], prev?: { n: number; errors: ForecastError[]; first_t: number } | null): ForecastError[] {
   const t = exps.map((e) => e.t), y = exps.map((e) => e.y)
   const interr = interruptionFlags(exps); const S = strataFor(exps)
   const out: ForecastError[] = []
-  for (let k = CFG.M_min; k < exps.length; k++) {
+  let k0: number = CFG.M_min
+  if (prev && prev.n <= exps.length && exps.length > 0 && prev.first_t === exps[0].t) {
+    const kFinal = prev.n - (CFG.stratum_window + 1)              // errores con k < kFinal: estratos y ventana ya definitivos
+    for (const fe of prev.errors) if (fe.k < kFinal) out.push({ ...fe, valid: (!exps[fe.k].excluded_from_noise) && (!interr[fe.k]) && exps[fe.k].session_type === 'normal' })
+    k0 = Math.max(CFG.M_min, kFinal)
+  }
+  for (let k = k0; k < exps.length; k++) {
     const lo = Math.max(0, k - CFG.M_max)
     const idx: number[] = []
     for (let i = lo; i < k; i++) if (exps[i].session_type === 'normal') idx.push(i)
@@ -563,7 +573,7 @@ export function pairwiseClusterCorr(stats: readonly VariantStats[]): [number[][]
       const m = pairs.length
       if (m >= CFG.cluster_corr_min_pairs) {
         const xa = pairs.map((p) => p[0]), xb = pairs.map((p) => p[1])
-        if (std(xa) > 0 && std(xb) > 0) { rs.push(corrcoef(xa, xb)); ms.push(m) }
+        if (std(xa) > 1e-12 && std(xb) > 1e-12) { rs.push(corrcoef(xa, xb)); ms.push(m) }   // residuos numéricamente constantes ⇒ sin información
       }
     }
     let rho: number

@@ -4,14 +4,16 @@
  * fase nutricional; fatiga solo si existe. T, D, σ, ρ y tiers viven en «¿por qué?».
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { MeamWorkerRequest, MeamWorkerResponse } from '../meam/meam.worker'
+import { calcularInforme } from '../meam/meam.worker'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertTriangle, Activity } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { useHistorialRef } from '../hooks/useHistorialRef'
 import { nombreCanonico } from '../utils/normalizar'
-import { construirMapaVariantes, type VariantOverride } from '../meam/variants'
-import { ejecutarMeam, type InformeMeam, type InformeMusculo, type Confianza } from '../meam/run'
+import type { VariantOverride } from '../meam/variants'
+import type { InformeMeam, InformeMusculo, Confianza } from '../meam/run'
 import { cargarVariantesRevisadas, guardarSnapshots } from '../meam/services'
 import { MEAM_CONFIG } from '../meam/config'
 
@@ -35,24 +37,59 @@ export default function MeamPage() {
   const ejercicios = useFitLogStore(useShallow((s) => s.ejercicios))
   const [overrides, setOverrides] = useState<VariantOverride[] | null>(null)
   const [abierto, setAbierto] = useState<string | null>(null)
+  const [informe, setInforme] = useState<InformeMeam | null>(null)
+  const [calculando, setCalculando] = useState(true)
+  const [ms, setMs] = useState<number | null>(null)
   const guardadoRef = useRef<string>('')
+  const workerRef = useRef<Worker | null>(null)
+  const reqIdRef = useRef(0)
+  const huellaRef = useRef('')
 
   useEffect(() => { cargarVariantesRevisadas().then(setOverrides).catch(() => setOverrides([])) }, [])
 
-  const informe: InformeMeam | null = useMemo(() => {
-    if (overrides === null) return null
+  // Huella de CONTENIDO del historial (no de referencia): el pull cada 5 s crea arrays nuevos con los mismos datos (auditoría 6, C1)
+  const huella = useMemo(() => {
+    const partes: string[] = []
+    for (const s of historial) partes.push(`${s.id}|${s.fecha}|${s.tipoSesion ?? ''}|${s.gimnasio ?? ''}|${s.ejercicios.map((e) => `${e.nombreSustituido ?? e.nombreSnapshot}:${e.series.map((x) => `${x.reps}/${x.pesoKg}/${x.etiqueta ?? ''}`).join(',')}`).join(';')}`)
+    partes.push(`P:${registrosPeso.map((p) => `${p.fecha}=${p.pesoKg}`).join(',')}`)
+    partes.push(`E:${ejercicios.map((e) => `${e.nombre}${e.esAsistencia ? '*' : ''}`).join(',')}`)
+    partes.push(`O:${JSON.stringify(overrides ?? [])}`)
+    return partes.join('\n')
+  }, [historial, registrosPeso, ejercicios, overrides])
+
+  useEffect(() => {
+    if (overrides === null) return
+    if (huella === huellaRef.current) return
+    huellaRef.current = huella
     const nombres = new Set<string>()
     for (const s of historial) for (const e of s.ejercicios) nombres.add(e.nombreSustituido ?? e.nombreSnapshot)
     for (const e of ejercicios) nombres.add(e.nombre)
-    const asistencia = new Set(ejercicios.filter((e) => e.esAsistencia).map((e) => nombreCanonico(e.nombre)))
-    const mapa = construirMapaVariantes(nombres, overrides, asistencia)
-    try {
-      return ejecutarMeam(historial, mapa, registrosPeso)
-    } catch (e) {
-      console.error('[MEAM] error al calcular:', e)
-      return null
+    const asistencia = [...new Set(ejercicios.filter((e) => e.esAsistencia).map((e) => nombreCanonico(e.nombre)))]
+    const req: MeamWorkerRequest = { id: ++reqIdRef.current, sesiones: historial, pesos: registrosPeso, nombres: [...nombres], overrides, asistencia }
+    setCalculando(true)
+    const aplicar = (res: MeamWorkerResponse) => {
+      if (res.id !== reqIdRef.current) return
+      if (res.error) console.error('[MEAM] error al calcular:', res.error)
+      setInforme(res.informe); setMs(res.ms); setCalculando(false)
     }
-  }, [historial, registrosPeso, ejercicios, overrides])
+    try {
+      if (typeof Worker !== 'undefined') {
+        if (!workerRef.current) {
+          workerRef.current = new Worker(new URL('../meam/meam.worker.ts', import.meta.url), { type: 'module' })
+          workerRef.current.onmessage = (ev: MessageEvent<MeamWorkerResponse>) => aplicar(ev.data)
+          workerRef.current.onerror = (e) => { console.warn('[MEAM] worker no disponible, calculando en el hilo principal:', e.message); aplicar(calcularInforme(req)) }
+        }
+        workerRef.current.postMessage(req)
+        return
+      }
+    } catch (e) {
+      console.warn('[MEAM] worker no disponible, calculando en el hilo principal:', e)
+    }
+    // sin Worker (navegadores antiguos): cálculo en el hilo principal, diferido para no bloquear el primer render
+    setTimeout(() => aplicar(calcularInforme(req)), 0)
+  }, [huella, historial, registrosPeso, ejercicios, overrides])
+
+  useEffect(() => () => { workerRef.current?.terminate(); workerRef.current = null }, [])
 
   // snapshots append-only: una vez por corte y sesión de la app (idempotente por input_hash)
   useEffect(() => {
@@ -72,13 +109,13 @@ export default function MeamPage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-black text-white tracking-tight">Evidencia de adaptación</h1>
           <p className="text-[11px] text-zinc-500">
-            {informe ? `Corte ${informe.corte} · motor ${informe.configVersion}` : 'Calculando…'}
+            {calculando ? 'Calculando…' : informe ? `Corte ${informe.corte} · motor ${informe.configVersion}${ms !== null ? ` · ${(ms / 1000).toFixed(1)} s` : ''}` : 'Sin datos'}
             {informe && informe.faseNutricional !== 'desconocida' && ` · peso ${signo(informe.pesoPendientePctSem)} %/sem (${informe.faseNutricional})`}
           </p>
         </div>
       </div>
 
-      {informe && informe.musculos.length === 0 && (
+      {!calculando && informe && informe.musculos.length === 0 && (
         <p className="mx-4 text-sm text-zinc-500">Todavía no hay suficientes sesiones (hacen falta al menos 3 exposiciones por ejercicio y 6 semanas).</p>
       )}
 
@@ -127,7 +164,7 @@ function TarjetaMusculo({ m, abierto, onToggle }: { m: InformeMusculo; abierto: 
           {m.ejercicios.some((e) => e.sinMejoraEn6) && <span className="text-amber-400/90">sin mejora en 6 exposiciones: {m.ejercicios.filter((e) => e.sinMejoraEn6).map((e) => e.nombre).join(', ')}</span>}
         </div>
       </div>
-      <button onClick={onToggle} className="w-full flex items-center justify-center gap-1 py-2 text-[11px] font-bold text-zinc-500 border-t border-zinc-800 active:bg-zinc-800">
+      <button onClick={onToggle} aria-expanded={abierto} aria-label={`${abierto ? 'Ocultar' : 'Ver'} el detalle de ${m.nombre}`} className="w-full flex items-center justify-center gap-1 py-2 text-[11px] font-bold text-zinc-400 border-t border-zinc-800 active:bg-zinc-800">
         {abierto ? <ChevronUp size={14} /> : <ChevronDown size={14} />} ¿Por qué?
       </button>
       {abierto && (

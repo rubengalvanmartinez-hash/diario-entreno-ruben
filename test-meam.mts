@@ -170,5 +170,47 @@ check("'Bíceps' vía alias → clave canónica 'biceps con barra fija'", constr
   check('e2e: estado PROGRESANDO o tendencia positiva', !!pecho && (pecho.estado === 'PROGRESANDO' || pecho.etiqueta.includes('POSITIVA') || pecho.etiqueta === 'PROGRESO_LENTO_26S'), pecho ? `${pecho.estado}/${pecho.etiqueta}` : '')
   check('e2e: input_hash determinista', !!pecho && ejecutarMeam(ses, construirMapaVariantes(['Press de pecho']), [], { hoy: fechaN(30 * 7), rhoFixed: 0.1 }).musculos[0].inputHash === pecho.inputHash)
 }
-console.log(`\n${total} comprobaciones, ${fallos} fallos (incluida la capa P0–P3)`)
+
+// ── correcciones de la auditoría 6 ───────────────────────────────────────────
+{
+  // erratas consecutivas del mismo signo (cambio real de nivel: otra máquina) ⇒ se aceptan como nuevo nivel con ruptura propuesta
+  const ses: SesionConTipo[] = []
+  for (let i = 0; i < 8; i++) ses.push(sesion(`n${i}`, fechaN(i * 3), [{ nombre: 'Prensa 45', series: [serie(1, 10, 100), serie(2, 10, 100)] }]))
+  for (let i = 8; i < 14; i++) ses.push(sesion(`n${i}`, fechaN(i * 3), [{ nombre: 'Prensa 45', series: [serie(1, 10, 150), serie(2, 10, 150)] }]))   // +50 % (kg por lado → total)
+  const der = derivarExposiciones(ses, construirMapaVariantes(['Prensa 45']))
+  const dv = der.variantes.get('prensa 45')!
+  check('nuevo nivel: las 6 sesiones a 150 kg entran como exposiciones (no erratas permanentes)', dv.exps.length === 14 && dv.erratas.length === 0, `${dv.exps.length}/${dv.erratas.length}`)
+  check('nuevo nivel: ruptura de protocolo propuesta en la primera sesión del nuevo nivel', dv.rupturasPropuestas.length === 1 && Math.abs(dv.rupturasPropuestas[0] - 24 / 7) < 1e-9)
+  check('nuevo nivel: exposiciones ordenadas por t', dv.exps.every((e, i) => i === 0 || e.t >= dv.exps[i - 1].t))
+}
+{
+  // una errata aislada sigue excluida
+  const ses: SesionConTipo[] = []
+  for (let i = 0; i < 6; i++) ses.push(sesion(`e${i}`, fechaN(i * 3), [{ nombre: 'Remo', series: [serie(1, 8, 80)] }]))
+  ses.push(sesion('e6', fechaN(18), [{ nombre: 'Remo', series: [serie(1, 8, 800)] }]))
+  ses.push(sesion('e7', fechaN(21), [{ nombre: 'Remo', series: [serie(1, 8, 80)] }]))
+  const dv = derivarExposiciones(ses, construirMapaVariantes(['Remo'])).variantes.get('remo')!
+  check('errata aislada excluida y la racha se reinicia', dv.exps.length === 7 && dv.erratas.length === 1)
+}
+{
+  // lastre: dominadas sin asistencia = BW_ref + lastre; a 0 kg también cuenta (BW)
+  const pesos: RegistroPeso[] = [{ id: 'p1', fecha: fechaN(0), pesoKg: 87, sincronizado: true }, { id: 'p2', fecha: fechaN(2), pesoKg: 89, sincronizado: true }]
+  const ses = [sesion('l1', fechaN(3), [{ nombre: 'Dominadas', series: [serie(1, 8, 0)] }]), sesion('l2', fechaN(6), [{ nombre: 'Dominadas', series: [serie(1, 6, 10)] }])]
+  const dv = derivarExposiciones(ses, construirMapaVariantes(['Dominadas']), pesos).variantes.get('dominadas')!
+  check('lastre: BW_ref = mediana de 7 d (88) ⇒ 0 kg → 88 kg y 10 kg → 98 kg', dv.exps.length === 2 && Math.abs(dv.extras[0].topLoad - 88) < 1e-9 && Math.abs(dv.extras[1].topLoad - 98) < 1e-9, dv.extras.map((x) => x.topLoad).join(','))
+}
+{
+  // volumen: los calentamientos no cuentan como series
+  const der = derivarExposiciones([sesion('v1', fechaN(0), [{ nombre: 'Press de pecho', series: [serie(1, 12, 40), serie(2, 8, 100), serie(3, 8, 100)] }])], construirMapaVariantes(['Press de pecho']))
+  check('volumen semanal cuenta solo series de trabajo (2, no 3)', der.volumenPorMusculo.get('pecho')![0].series === 2)
+  check('reducción de volumen ignora la semana en curso', reduccionesDeVolumen([10, 10, 10, 10, 5].map((series, i) => ({ lunes: '', semana: i, series, duras: 0 })), 4).length === 0)
+}
+{
+  // mapa: correcciones de la auditoría 6
+  check("'Elevación de talones' → gemelo", inferirVariante('Elevación de talones').musculo === 'gemelo')
+  check("'Curl nórdico' → femoral", inferirVariante('Curl nórdico').musculo === 'femoral_gluteo')
+  check("'Remo al mentón' → hombro", inferirVariante('Remo al mentón').musculo === 'hombro')
+  check("'Fondos' → pecho, peso corporal + lastre", inferirVariante('Fondos').equipment === 'weighted_bodyweight')
+}
+console.log(`${total} comprobaciones, ${fallos} fallos (con las correcciones de la auditoría 6)`)
 if (fallos > 0) process.exit(1)
