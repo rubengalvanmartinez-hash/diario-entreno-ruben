@@ -28,6 +28,8 @@ export interface InformeMusculo {
   recuperacion: string
   etiquetaRecuperacion: string
   confianza: Confianza
+  /** por qué la confianza es BAJA en el corte actual, en lenguaje llano (vacío si no lo es o si lo es solo por histéresis) */
+  motivosConfianza: string[]
   accion: string
   textoUsuario: string
   cambioKg: [number, number] | null    // IC del cambio total en la ventana, en kg de e1RM (media de clusters)
@@ -77,64 +79,97 @@ export function pendientePesoCorporal(pesos: readonly RegistroPeso[], hoy: strin
   return f ? f.slope * 100 : Number.NaN
 }
 
+/**
+ * Motivos reales que rebajan la confianza a BAJA (P14), en lenguaje llano. Vacío si no hay ninguno.
+ * La falta de calibración de ρ NO es motivo: el motor ya usa ρ por defecto (rho_default_uncalibrated) que ensancha el error
+ * estándar de la tendencia, así que penalizarla otra vez en la confianza contaba dos veces lo mismo y, con 1 sesión/semana
+ * por ejercicio, dejaba BAJA de forma permanente (hacen falta ≥ 20 exposiciones en 16 semanas). Sin calibrar solo se veta ALTA.
+ */
+export function motivosBajaConfianza(row: SnapshotRow): string[] {
+  const ev = row.evidence
+  if (!ev.muscle) return []
+  const vars = ev.variants
+  const tiers = vars.map((v) => v.tier)
+  const out: string[] = []
+  if (tiers.length > 0 && tiers.every((t) => t === 'PROVISIONAL' || t === 'NONE')) out.push('todos los ejercicios tienen todavía pocas sesiones')
+  if (ev.muscle.contradiction) out.push('los ejercicios de este músculo se contradicen entre sí')
+  // banderas exactas: POST_INTERRUPCION_SIN_CAMBIO_DE_NIVEL persiste todo el segmento y no es una interrupción reciente (auditoría 6)
+  const flags = new Set(row.flags ? row.flags.split(',') : [])
+  if (flags.has('POST_INTERRUPCION') || vars.some((v) => v.interruption_recent)) out.push('vienes de un parón reciente')
+  if (flags.has('CAMBIO_DE_ESTRATO_PENDIENTE')) out.push('has cambiado hace poco el rango de repeticiones')
+  return out
+}
+
 function confianzaDe(row: SnapshotRow, rhoCalibrado: boolean): Confianza {
   const ev = row.evidence
   if (row.adaptation === 'INCONCLUYENTE' || !ev.muscle) return 'INSUFICIENTE'
-  const vars = ev.variants
-  const tiers = vars.map((v) => v.tier)
-  const soloProvisional = tiers.length > 0 && tiers.every((t) => t === 'PROVISIONAL' || t === 'NONE')
-  // banderas exactas: POST_INTERRUPCION_SIN_CAMBIO_DE_NIVEL persiste todo el segmento y no es una interrupción reciente (auditoría 6)
-  const flags = new Set(row.flags ? row.flags.split(',') : [])
-  const interrupcion = flags.has('POST_INTERRUPCION') || flags.has('CAMBIO_DE_ESTRATO_PENDIENTE') || vars.some((v) => v.interruption_recent)
-  if (soloProvisional || ev.muscle.contradiction || interrupcion || !rhoCalibrado) return 'BAJA'
+  if (motivosBajaConfianza(row).length > 0) return 'BAJA'
+  const tiers = ev.variants.map((v) => v.tier)
   const dir = row.adaptation === 'PROGRESANDO' ? 1 : (row.adaptation === 'DECLINANDO' || row.adaptation === 'REGRESION_PROBABLE') ? -1 : 0
   const clustersDetectando = Object.values(ev.clusters).filter((c) => c && (dir > 0 ? c.lower_pct_wk > 0 : dir < 0 ? c.upper_pct_wk < 0 : false)).length
   const todosEstablecidos = tiers.every((t) => t === 'ESTABLISHED' || t === 'MATURE')
-  if (dir !== 0 && clustersDetectando >= 2 && todosEstablecidos) return 'ALTA'
+  // ALTA exige además ρ calibrado: sin autocorrelación medida no se afirma la máxima confianza
+  if (dir !== 0 && clustersDetectando >= 2 && todosEstablecidos && rhoCalibrado) return 'ALTA'
   return 'MEDIA'
+}
+
+/** Ventana real de la tendencia («las últimas N semanas»): el span de los ejercicios que la sostienen, entre 6 y 16 semanas. */
+function ventanaDe(row: SnapshotRow): string {
+  const n = Math.round(row.evidence.span_weeks)
+  return Number.isFinite(n) && n > 0 ? `las últimas ${n} semanas` : 'la ventana analizada'
 }
 
 function accionDe(row: SnapshotRow, conf: Confianza, sinMejora: boolean, volPct: number, fase: InformeMeam['faseNutricional'], pesoSlope: number, contextoAlto: boolean): [string, string] {
   const est = row.adaptation, rec = row.recovery
   const deficit = fase === 'deficit'
+  // Textos en lenguaje llano (la pantalla la lee gente sin formación en entrenamiento); la lógica de ramas es la de P10/P11/P14.
   if (rec === 'FATIGA_SOSPECHADA') {
-    return ['Descenso persistente de rendimiento compatible con fatiga.', 'Propuesta: semana de descarga (−40–50 % de series, RIR 3–4). Márcala como descarga y la app comprobará el rebote.']
+    return ['Llevas varias sesiones por debajo de lo normal: parece cansancio acumulado.', 'Propuesta: una semana suave (descarga) con la mitad de series y quedándote lejos del fallo (3–4 repeticiones en reserva). Márcala como descarga en la app y comprobará si rebotas.']
   }
-  if (rec === 'FATIGA_APOYADA') return ['La caída se explica por fatiga: hubo reducción y rebote.', 'Vuelve al plan normal; la referencia se mantiene hasta recuperar el nivel.']
-  if (rec === 'NO_ATRIBUIDA') return ['Caída persistente que no se ha podido atribuir a fatiga.', 'Revisa técnica, variante o protocolo; si hay déficit o sueño/estrés altos, corrígelos antes de cambiar el estímulo.']
-  if (conf === 'INSUFICIENTE') return ['Todavía no hay evidencia suficiente en este músculo.', 'Sigue registrando: mismo ejercicio, mismo rango de repeticiones y RIR del top set.']
-  if (conf === 'BAJA') return ['Evidencia de baja confianza (ruido sin calibrar, interrupción o contradicción entre ejercicios).', 'Sin acción: se confirma con más datos.']
-  if (est === 'PROGRESANDO') return ['Rendimiento en ascenso.', 'Mantener el plan.']
+  if (rec === 'FATIGA_APOYADA') return ['El bajón se explica por cansancio: bajaste el ritmo y has vuelto a subir.', 'Vuelve al plan normal; la app sigue comparando con el nivel de antes del bajón hasta que lo recuperes.']
+  if (rec === 'NO_ATRIBUIDA') return ['Bajón que se mantiene y que no se explica por cansancio.', 'Revisa la técnica, el ejercicio o cómo lo estás haciendo; si comes poco o duermes mal, corrige eso antes de cambiar el entreno.']
+  if (conf === 'INSUFICIENTE') return ['Todavía no hay datos suficientes en este músculo.', 'Sigue apuntando: mismo ejercicio, mismo rango de repeticiones y anota cuántas repeticiones te quedaban (RIR) en la serie fuerte.']
+  // Con confianza BAJA la acción se sigue mostrando: lo que no se propone es cambiar el estímulo por un descenso aún no firme (P14).
+  const baja = conf === 'BAJA' ? ', aunque la evidencia aún es débil' : ''
+  if (est === 'PROGRESANDO') return [`Estás mejorando${baja}.`, 'Sigue con el mismo plan.']
   if (est === 'DECLINANDO' || est === 'REGRESION_PROBABLE') {
-    if (deficit) return [`Descenso de rendimiento durante déficit (peso ${pesoSlope.toFixed(2)} %/sem).`, `${pesoSlope <= -1.0 ? 'Aviso: pérdida > 1 %/sem. ' : ''}Revisa el ritmo de pérdida y mantén el volumen; no reduzcas el estímulo.`]
-    if (contextoAlto) return ['Descenso de rendimiento con carga contextual alta.', 'Propuesta de descarga diagnóstica; márcala como descarga para comprobar el rebote.']
-    return ['Descenso de rendimiento sin fatiga ni déficit detectados.', 'Revisa técnica, variante y protocolo; considera una descarga diagnóstica.']
+    if (conf === 'BAJA') return ['Parece que bajas, pero la evidencia aún es débil.', 'No cambies nada todavía: sigue apuntando y en las próximas semanas se confirmará o se descartará.']
+    if (deficit) return [`Bajas rendimiento mientras pierdes peso (${pesoSlope.toFixed(2)} %/sem).`, `${pesoSlope <= -1.0 ? 'Aviso: estás perdiendo más de un 1 % a la semana; frena el ritmo. ' : ''}Es normal al perder peso: mantén las series y no bajes el estímulo.`]
+    if (contextoAlto) return ['Bajas rendimiento y llevas semanas con más volumen del habitual.', 'Propuesta: una semana suave (descarga) para ver si rebotas; márcala como descarga en la app.']
+    return ['Bajas rendimiento sin cansancio ni pérdida de peso que lo expliquen.', 'Revisa la técnica, el ejercicio y cómo lo haces; una semana suave (descarga) ayudaría a salir de dudas.']
   }
   if (est === 'ESTABLE') {
-    if (sinMejora && Number.isFinite(volPct) && volPct < CFG.volume_low_percentile) return ['Estable, sin mejora en las últimas 6 exposiciones y volumen reciente en tu 40 % inferior.', 'Si buscas progresar aquí, revisa volumen y frecuencia.']
-    if (sinMejora) return ['Estable, sin mejora en las últimas 6 exposiciones.', 'Sin cambio de estímulo por ahora; vigila las próximas semanas.']
-    return ['Sin cambio detectable en la ventana de 16 semanas.', 'Mantener.']
+    if (sinMejora && Number.isFinite(volPct) && volPct < CFG.volume_low_percentile) return [`Estancado: ningún récord en las últimas 6 sesiones y menos series de lo habitual en ti${baja}.`, 'Si quieres progresar aquí, sube series o frecuencia.']
+    if (sinMejora) return [`Estancado: ningún récord en las últimas 6 sesiones${baja}.`, 'No cambies nada aún; vigila las próximas semanas.']
+    return [`Sin cambios claros en ${ventanaDe(row)}${baja}.`, 'Sigue igual.']
   }
   return ['', '']
 }
 
+/** Frase principal de la tarjeta, en lenguaje llano. El «cambio» es el intervalo del cambio de fuerza estimada (e1RM) en la ventana real de la tendencia (span_weeks). */
 function textoDe(row: SnapshotRow, m: InformeMusculo): string {
   const kg = m.cambioKg
-  const rango = kg ? ` (entre ${kg[0] >= 0 ? '+' : ''}${kg[0].toFixed(1)} y ${kg[1] >= 0 ? '+' : ''}${kg[1].toFixed(1)} kg de e1RM en la ventana)` : ''
+  const s = (x: number): string => `${x >= 0 ? '+' : ''}${x.toFixed(1)}`
+  const ventana = ventanaDe(row)
+  const rango = kg ? ` (entre ${s(kg[0])} y ${s(kg[1])} kg de fuerza estimada en ${ventana})` : ''
   switch (row.adaptation) {
-    case 'PROGRESANDO': return `Progresando${rango}.`
-    case 'DECLINANDO': return `Descenso de rendimiento${rango}.`
-    case 'REGRESION_PROBABLE': return `Regresión probable${rango}.`
-    case 'INCONCLUYENTE': return 'Sin evidencia suficiente todavía.'
+    case 'PROGRESANDO': return `Tu fuerza en este músculo va subiendo${rango}.`
+    case 'DECLINANDO': return `Tu fuerza en este músculo va bajando${rango}.`
+    case 'REGRESION_PROBABLE': return `Llevas semanas perdiendo fuerza y se ha confirmado varias veces${rango}.`
+    case 'INCONCLUYENTE': {
+      const flags = row.flags ? row.flags.split(',') : []
+      if (flags.includes('POST_INTERRUPCION')) return 'Vienes de un parón: hacen falta unas semanas más de sesiones para volver a evaluar este músculo.'
+      return 'Aún no hay datos suficientes para decir nada.'
+    }
     default: {
       const l = row.adapt_label
-      if (l === 'PROGRESO_LENTO_26S') return `Sin cambio concluyente en 16 semanas; en 26 semanas la tendencia es positiva${rango}.`
-      if (l === 'DECLIVE_LENTO_26S') return `Sin cambio concluyente en 16 semanas; en 26 semanas la tendencia es negativa${rango}.`
-      if (l === 'TENDENCIA_POSITIVA_NO_CONCLUYENTE') return `Tendencia positiva no concluyente${rango}.`
-      if (l === 'TENDENCIA_NEGATIVA_NO_CONCLUYENTE') return `Tendencia negativa no concluyente${rango}.`
-      if (l === 'PROGRESO_RECIENTE_NO_CONFIRMADO') return 'Progreso reciente pendiente de confirmar.'
-      if (l === 'EVIDENCIA_MIXTA') return 'Evidencia mixta entre ejercicios.'
-      return `Sin cambio detectable${rango}.`
+      if (l === 'PROGRESO_LENTO_26S') return `Sin cambio claro en ${ventana}, pero mirando 26 semanas vas subiendo poco a poco${rango}.`
+      if (l === 'DECLIVE_LENTO_26S') return `Sin cambio claro en ${ventana}, pero mirando 26 semanas vas bajando poco a poco${rango}.`
+      if (l === 'TENDENCIA_POSITIVA_NO_CONCLUYENTE') return `Apunta a mejora, pero aún no es concluyente${rango}.`
+      if (l === 'TENDENCIA_NEGATIVA_NO_CONCLUYENTE') return `Apunta a bajada, pero aún no es concluyente${rango}.`
+      if (l === 'PROGRESO_RECIENTE_NO_CONFIRMADO') return `Mejoras en el conjunto de ${ventana}, pero las últimas semanas no lo confirman${rango}.`
+      if (l === 'EVIDENCIA_MIXTA') return 'Unos ejercicios de este músculo suben y otros bajan.'
+      return `Te mantienes en el mismo nivel${rango}.`
     }
   }
 }
@@ -206,7 +241,9 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
     const sesionesUlt3 = new Set(dvs.flatMap((dv) => dv.extras.filter((x) => x.t >= corte - 3 && x.t < corte).map((x) => x.sesionId))).size
     const rhoCal = fila.evidence.rho_calibrated
     const conf = confianzaConHisteresis(rows)
-    const sinMejora = dvs.some((dv) => dv.sinMejoraEn6)
+    // «estancado» a nivel músculo: ningún récord en NINGUNO de los ejercicios con indicador calculable (≥ 7 exposiciones normales)
+    const conIndicador = dvs.filter((dv) => dv.extras.filter((x) => x.tipo === 'normal').length >= 7)
+    const sinMejora = conIndicador.length > 0 && conIndicador.every((dv) => dv.sinMejoraEn6)
     const [accionTitulo, accionTexto] = accionDe(fila, conf, sinMejora, volPct, fase, pesoSlope, ctxAlto.has(corte))
     const ev = fila.evidence
     const e1rmActual = (v: VariantEvidence): number => {
@@ -230,7 +267,7 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
     const inputHash = fnv1a64(JSON.stringify({ cfg: CFG.config_version, v: dvs.map((dv) => [dv.meta.key, dv.exps.map((e) => [e.t, e.y, e.session_type, e.reps_typical, e.load_kg])]), ctx: [...ctxAlto], red: reducciones }))
     const m: InformeMusculo = {
       musculo, nombre: MUSCULOS_MEAM[musculo], semana: corteIso(corte), estado: fila.adaptation, etiqueta: fila.adapt_label, recuperacion: fila.recovery,
-      etiquetaRecuperacion: fila.rec_label, confianza: conf, accion: `${accionTitulo} ${accionTexto}`.trim(), textoUsuario: '', cambioKg,
+      etiquetaRecuperacion: fila.rec_label, confianza: conf, motivosConfianza: conf === 'BAJA' ? motivosBajaConfianza(fila) : [], accion: `${accionTitulo} ${accionTexto}`.trim(), textoUsuario: '', cambioKg,
       T: fila.T, D: fila.D, sigmaPct: fila.sigma_pct, rho: fila.rho, rhoCalibrado: rhoCal, volumenSeriesSemana: volSem, volumenPercentil: volPct,
       frecuenciaSemanal: sesionesUlt3 / 3, contextoAlto: ctxAlto.has(corte), ejercicios, flags: fila.flags ? fila.flags.split(',') : [], fila, historial: rows,
       nExposicionesTotal: fila.n_exp, inputHash,

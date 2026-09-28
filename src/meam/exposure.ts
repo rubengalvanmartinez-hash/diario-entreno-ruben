@@ -258,7 +258,11 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
 export function percentilVolumen(semanas: readonly SemanaVolumen[], valor: number): number {
   const v = semanas.map((s) => s.series).filter((x) => x > 0)
   if (v.length < 4) return Number.NaN
-  return 100 * v.filter((x) => x <= valor).length / v.length
+  // rango medio: los empates cuentan la mitad. Con «<=» un volumen constante daba P100 y contexto alto en todos los cortes
+  // (y con ello la entrada en FATIGA_SOSPECHADA con un solo ejercicio) — auditoría 7
+  let menores = 0, iguales = 0
+  for (const x of v) { if (x < valor) menores++; else if (x === valor) iguales++ }
+  return 100 * (menores + 0.5 * iguales) / v.length
 }
 
 /**

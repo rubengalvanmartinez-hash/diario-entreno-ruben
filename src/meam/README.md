@@ -8,7 +8,7 @@ Port a TypeScript de la implementación de referencia Python (`meam_core.py`, `m
 
 | Fichero | Qué es | Origen |
 |---|---|---|
-| `config.ts` | Constantes versionadas (`config_version` 2.3.0-rc). Ninguna constante fuera de aquí | `CONFIG` de meam_core.py |
+| `config.ts` | Constantes versionadas (`config_version` 2.3.1-rc; `model_version` meam-ts-2.3.2 para la capa de informe). Ninguna constante fuera de aquí | `CONFIG` de meam_core.py |
 | `mathx.ts` | Cuantiles normal y t de Student, mediana, percentil, correlación… sin dependencias | numpy/scipy |
 | `core.ts` | Theil-Sen estratificado con IC de Sen y Hamed-Rao finito, estratos por rango de reps con histéresis, escala causal, D, cluster con ρ̂, músculo, máquinas de estado (adaptación y recuperación), canal largo piloto | meam_core.py |
 | `engine.ts` | `runSnapshots`: orquestación a fecha de corte, exclusiones derivadas versionadas, driver de recuperación, evidencia | meam_engine.py |
@@ -22,7 +22,7 @@ Port a TypeScript de la implementación de referencia Python (`meam_core.py`, `m
 ## Verificación
 
 ```bash
-npm run test:meam    # 381 snapshots dorados (tests/meam_golden.json) comparados con la referencia Python + tests P0–P3
+npm run test:meam    # 381 snapshots dorados (tests/meam_golden.json; 431 más con MEAM_GOLDEN=<batería de la auditoría>) comparados con la referencia Python + tests P0–P3
 npm run test:logic   # tests previos de la app
 npm run build        # tsc -b && vite build (obligatorio antes de subir)
 ```
@@ -41,7 +41,7 @@ Ejecutar `supabase_v2.8.0_meam.sql` una vez: `entrenos.tipo_sesion`, `meam_varia
 - Canal largo de 26 semanas: **piloto**, solo etiqueta (`PROGRESO_LENTO_26S` / `DECLIVE_LENTO_26S`) en «¿Por qué?»; nunca cambia el estado.
 - Exclusiones de ruido solo por episodio confirmado (evento exógeno + rebote), con tope de 10 semanas/52 (`EXCLUSION_EXCESIVA`).
 - Contexto de carga alta: en la app solo hay volumen (≥ P70 personal); RPE/sueño/estrés/dolor no se registran todavía.
-- Confianza BAJA y sin acción mientras `RUIDO_NO_CALIBRADO` (hacen falta ≥ 3 ejercicios con ≥ 20 exposiciones en ventana).
+- Confianza (P14, `meam-ts-2.3.2`): BAJA solo por motivo real (todos los ejercicios PROVISIONAL, contradicción entre ejercicios, parón o cambio de estrato reciente); ρ sin calibrar (`rho_calibrated=false`: hacen falta ≥ 3 ejercicios con ≥ 20 exposiciones normales en 16 semanas, inalcanzable a 1 sesión/semana) **no** rebaja a BAJA porque el motor ya usa `rho_default_uncalibrated` que ensancha el error estándar — solo veta ALTA. La acción se muestra siempre; con BAJA y descenso no se propone cambio de estímulo.
 - `deload_inferido`: series de trabajo ≤ 60 % y carga top ≤ 90 % de la mediana de las sesiones normales de los 28 días previos (mín. 3); una descarga no se evalúa como errata.
 - Errata: |ln e1RM − mediana de las 5 previas| > 0,22 ⇒ excluida; **tres seguidas del mismo signo = nuevo nivel** (se readmiten, ruptura de protocolo propuesta, referencia nueva).
 - Dominadas/fondos sin asistencia: `weighted_bodyweight` (W = BW_ref + lastre; a 0 kg cuenta el peso corporal); asistidos: W = BW_ref − asistencia; BW_ref = mediana de 7 d (o último ≤ 21 d).

@@ -4,7 +4,7 @@
  */
 export const MEAM_CONFIG = {
   config_version: '2.3.1-rc',
-  model_version: 'meam-ts-2.3.1',
+  model_version: 'meam-ts-2.3.2',   // 2.3.2: confianza P14 sin doble penalización por ρ sin calibrar (capa de informe; el motor no cambia)
   // P0/P1 rendimiento
   e1rm_reps_min: 1, e1rm_reps_max: 12, e1rm_reps_max_isolation: 20, e1rm_rir_known_max: 3, rir_adjust_cap: 3,
   rep_bands: [[1, 5], [6, 8], [9, 12], [13, 20]] as ReadonlyArray<readonly [number, number]>,

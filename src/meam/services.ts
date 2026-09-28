@@ -57,7 +57,7 @@ function filaDe(usuarioId: string, inf: InformeMeam, m: InformeMusculo): Snapsho
     usuario_id: usuarioId, semana: m.semana, musculo: m.musculo, model_version: inf.modelVersion, config_version: inf.configVersion, input_hash: m.inputHash,
     estado: m.estado, etiqueta: m.etiqueta, recuperacion: m.recuperacion, etiqueta_recuperacion: m.etiquetaRecuperacion, confianza: m.confianza, accion: m.accion,
     evidencia: {
-      T: m.T, D: m.D, sigma_pct: m.sigmaPct, rho: m.rho, rho_calibrado: m.rhoCalibrado, cambio_kg: m.cambioKg, volumen_series_semana: m.volumenSeriesSemana,
+      T: m.T, D: m.D, sigma_pct: m.sigmaPct, rho: m.rho, rho_calibrado: m.rhoCalibrado, motivos_confianza: m.motivosConfianza, cambio_kg: m.cambioKg, volumen_series_semana: m.volumenSeriesSemana,
       volumen_percentil: m.volumenPercentil, frecuencia_semanal: m.frecuenciaSemanal, contexto_alto: m.contextoAlto, flags: m.flags,
       ejercicios: m.ejercicios.map((e) => ({ key: e.key, nombre: e.nombre, cluster: e.cluster, T: e.T, pendiente_pct_sem: e.pendientePctSem, mds_kg_mes: e.mdsKgMes, e1rm: e.e1rmActual, tier: e.tier,
         n: e.nExposiciones, calidad_temporal: e.calidadTemporal, estrato: e.estrato, sin_mejora_6: e.sinMejoraEn6, T_long: e.TLong, flags: e.flags })),
