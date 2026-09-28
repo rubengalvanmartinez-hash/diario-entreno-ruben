@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { calcularInforme, type MeamWorkerRequest, type MeamWorkerResponse } from '../meam/compute'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertTriangle, BatteryLow, Lightbulb, Scale } from 'lucide-react'
+import { ChevronLeft, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertTriangle, BatteryLow, Lightbulb, Scale, Copy, Check } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { useHistorialRef } from '../hooks/useHistorialRef'
@@ -106,6 +106,54 @@ const marcaLegible = (m: NonNullable<InformeEjercicio['mejorMarca']>): string =>
 const signo = (x: number, d = 2): string => (Number.isFinite(x) ? `${x >= 0 ? '+' : ''}${x.toFixed(d)}` : '—')
 const fechaCorta = (iso: string): string => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}` }
 
+/** Informe compacto en texto plano: lo mismo que enseña cada tarjeta y su «¿Por qué?» (para pegarlo en vez de capturas). */
+function informeTexto(inf: InformeMeam): string {
+  const L: string[] = []
+  const fase = inf.faseNutricional !== 'desconocida' ? ` · ${FASE[inf.faseNutricional]} (${signo(inf.pesoPendientePctSem)} %/sem)` : ''
+  L.push(`MEAM ${inf.configVersion} · semana del ${fechaCorta(inf.corte)} · hoy ${fechaCorta(inf.hoy)}${fase}`)
+  for (const m of inf.musculos) {
+    const nSem = Math.round(m.fila.evidence.span_weeks)
+    const rec = RECUP[m.recuperacion]
+    L.push('')
+    L.push(`## ${m.nombre}: ${SEMAFORO[semaforoDe(m)].label} [${m.estado}${m.etiqueta ? `/${m.etiqueta}` : ''}] · fiabilidad ${FIABILIDAD[m.confianza].label}${m.motivosConfianza.length ? ` (${m.motivosConfianza.join('; ')})` : ''}`)
+    L.push(`Texto: ${m.textoUsuario}`)
+    if (rec) L.push(`Recuperación: ${rec.label} [${m.recuperacion}${m.etiquetaRecuperacion ? `/${m.etiquetaRecuperacion}` : ''}]`)
+    else if (m.etiquetaRecuperacion) L.push(`Recuperación: ${legible(m.etiquetaRecuperacion)} [${m.etiquetaRecuperacion}]`)
+    if (m.accion) L.push(`Acción: ${m.accion}`)
+    L.push(`T ${signo(m.T)} · D ${signo(m.D)} · σ ${fmt(m.sigmaPct)} % · ρ ${fmt(m.rho)}${m.rhoCalibrado ? '' : ' (por defecto)'} · ventana ${Number.isFinite(nSem) ? nSem : '—'} sem · cambio ${m.cambioKg ? `${signo(m.cambioKg[0], 1)} a ${signo(m.cambioKg[1], 1)} kg` : '—'}`)
+    L.push(`Volumen ${fmt(m.volumenSeriesSemana, 0)} series/sem${Number.isFinite(m.volumenPercentil) ? ` (P${fmt(m.volumenPercentil, 0)})` : ''}${m.contextoAlto ? ' · carga alta' : ''} · ${fmt(m.frecuenciaSemanal, 1)} sesiones/sem · ${m.nExposicionesTotal} exposiciones`)
+    if (m.flags.length) L.push(`Avisos: ${m.flags.map((f) => `${legible(f)} [${f}]`).join(', ')}`)
+    for (const e of m.ejercicios) {
+      const p: string[] = [
+        `T ${signo(e.T)}`, `${signo(e.pendientePctSem)} %/sem`, `e1RM ${fmt(e.e1rmActual, 1)} kg`, `mín. detectable ${fmt(e.mdsKgMes, 1)} kg/mes`,
+        `${e.nExposiciones} sesiones${e.bloqueDesde ? ` desde ${fechaCorta(e.bloqueDesde)}` : ''}`, TIER[e.tier] ?? legible(e.tier),
+        CALIDAD[e.calidadTemporal] ?? legible(e.calidadTemporal),
+      ]
+      if (e.estrato) p.push(estratoLegible(e.estrato))
+      if (Number.isFinite(e.TLong)) p.push(`T26 ${signo(e.TLong)}`)
+      if (e.rirDisponible > 0) p.push(`RIR en ${e.rirDisponible}`)
+      if (e.erratas > 0) p.push(`${e.erratas} errata(s)`)
+      if (e.ultimaFecha) p.push(`última ${fechaCorta(e.ultimaFecha)}`)
+      if (e.mejorMarca) p.push(`${e.sinMejoraEn6 ? `SIN RÉCORD EN ${MEAM_CONFIG.no_improvement_exposures}` : 'con récord'}; a batir ${marcaLegible(e.mejorMarca)} del ${fechaCorta(e.mejorMarca.fecha)} (mejor de ${e.mejorMarca.nPrevias})`)
+      if (e.flags.length) p.push(`avisos: ${e.flags.map((f) => `${legible(f)} [${f}]`).join(', ')}`)
+      L.push(`- ${e.nombre} (${e.cluster}/${e.role}): ${p.join(' · ')}`)
+    }
+  }
+  if (inf.nombresSinMapa.length) { L.push(''); L.push(`Sin músculo asignado: ${inf.nombresSinMapa.join(' · ')}`) }
+  return L.join('\n')
+}
+
+/** Portapapeles con respaldo para navegadores sin API asíncrona o fuera de contexto seguro. */
+async function copiarTexto(texto: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(texto); return true } catch { /* respaldo abajo */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = texto; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select()
+    const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok
+  } catch { return false }
+}
+
 // ---------------------------------------------------------------------------
 // Página
 // ---------------------------------------------------------------------------
@@ -121,6 +169,7 @@ export default function MeamPage() {
   const [calculando, setCalculando] = useState(true)
   const [ms, setMs] = useState<number | null>(null)
   const [ayuda, setAyuda] = useState(false)
+  const [copiado, setCopiado] = useState<'ok' | 'error' | null>(null)
   const guardadoRef = useRef<string>('')
   const workerRef = useRef<Worker | null>(null)
   const reqIdRef = useRef(0)
@@ -208,6 +257,13 @@ export default function MeamPage() {
             {calculando ? 'Calculando…' : informe ? `Semana del ${fechaCorta(informe.corte)} · con todas las sesiones anteriores` : 'Sin datos'}
           </p>
         </div>
+        {informe && !calculando && informe.musculos.length > 0 && (
+          <button onClick={() => { copiarTexto(informeTexto(informe)).then((ok) => { setCopiado(ok ? 'ok' : 'error'); setTimeout(() => setCopiado(null), 2000) }) }}
+            aria-label="Copiar informe" title="Copiar informe"
+            className={`h-9 px-2.5 flex items-center gap-1 rounded-xl text-[11px] font-bold active:bg-zinc-800 ${copiado === 'ok' ? 'text-green-400' : copiado === 'error' ? 'text-red-400' : 'text-zinc-400'}`}>
+            {copiado === 'ok' ? <Check size={16} /> : <Copy size={16} />}{copiado === 'ok' ? 'Copiado' : copiado === 'error' ? 'Error' : 'Copiar informe'}
+          </button>
+        )}
         <button onClick={() => setAyuda((v) => !v)} aria-expanded={ayuda} aria-label="Cómo leer esta pantalla"
           className={`size-9 flex items-center justify-center rounded-xl active:bg-zinc-800 ${ayuda ? 'text-white bg-zinc-800' : 'text-zinc-400'}`}>
           <HelpCircle size={20} />
