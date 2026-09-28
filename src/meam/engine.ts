@@ -156,7 +156,7 @@ export function runSnapshots(variants: ReadonlyMap<string, VariantDef>, opts: Ru
   const pool = opts.pool ?? variants
   const exclusions: NoiseExclusion[] = []
   let ad: AdaptationState = initialAdaptation(); let rec: RecoveryState = recoveryState()
-  const rows: SnapshotRow[] = []; let lastMaxT = -Infinity; let exclFlags = new Set<string>()
+  const rows: SnapshotRow[] = []; let lastMaxT = -Infinity; let exclFlags = new Set<string>(); let exclFlagVid = ''
   const ctxHigh = opts.contextHighCutoffs ?? new Set<number>()
   const volRed = opts.volumeReductionTs ?? []
   const vids = [...variants.keys()]
@@ -221,12 +221,12 @@ export function runSnapshots(variants: ReadonlyMap<string, VariantDef>, opts: Ru
     }
     if (rec.state === 'FATIGA_APOYADA' && prevRecState !== 'FATIGA_APOYADA') {
       const t0 = rec.t_enter - CFG.recent_max_days / 7; const t1 = isFin(rec.reduction_t) ? rec.reduction_t : cutoff
-      if (coverWeeks(exclusions, rec.driver_vid, cutoff, [t0, t1]) > CFG.exclusion_max_weeks_52w) exclFlags = new Set(['EXCLUSION_EXCESIVA'])
+      if (coverWeeks(exclusions, rec.driver_vid, cutoff, [t0, t1]) > CFG.exclusion_max_weeks_52w) { exclFlags = new Set(['EXCLUSION_EXCESIVA']); exclFlagVid = rec.driver_vid }
       else exclusions.push({ vid: rec.driver_vid, t0, t1, from_cutoff: cutoff })
     }
-    // bandera no pegajosa: persiste mientras no quede sitio para un episodio típico bajo el tope (auditoría 6)
-    if (exclFlags.size && rec.driver_vid) {
-      if (coverWeeks(exclusions, rec.driver_vid, cutoff) + CFG.exclusion_typical_episode_weeks <= CFG.exclusion_max_weeks_52w) exclFlags = new Set()
+    // bandera no pegajosa: persiste mientras no quede sitio para un episodio típico bajo el tope en la variante que la provocó (auditoría 6)
+    if (exclFlags.size && exclFlagVid) {
+      if (coverWeeks(exclusions, exclFlagVid, cutoff) + CFG.exclusion_typical_episode_weeks <= CFG.exclusion_max_weeks_52w) { exclFlags = new Set(); exclFlagVid = '' }
     }
     const nExpTotal = [...perVar.values()].reduce((a, s) => a + s.n_exposures, 0)
     ad = stepAdaptation(ad, ms, nExpTotal, hasNew, inconclusive, rec.state === 'FATIGA_APOYADA')

@@ -4,8 +4,7 @@
  * fase nutricional; fatiga solo si existe. T, D, σ, ρ y tiers viven en «¿por qué?».
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MeamWorkerRequest, MeamWorkerResponse } from '../meam/meam.worker'
-import { calcularInforme } from '../meam/meam.worker'
+import { calcularInforme, type MeamWorkerRequest, type MeamWorkerResponse } from '../meam/compute'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertTriangle, Activity } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
@@ -44,6 +43,7 @@ export default function MeamPage() {
   const workerRef = useRef<Worker | null>(null)
   const reqIdRef = useRef(0)
   const huellaRef = useRef('')
+  const ultimaReqRef = useRef<MeamWorkerRequest | null>(null)
 
   useEffect(() => { cargarVariantesRevisadas().then(setOverrides).catch(() => setOverrides([])) }, [])
 
@@ -66,6 +66,7 @@ export default function MeamPage() {
     for (const e of ejercicios) nombres.add(e.nombre)
     const asistencia = [...new Set(ejercicios.filter((e) => e.esAsistencia).map((e) => nombreCanonico(e.nombre)))]
     const req: MeamWorkerRequest = { id: ++reqIdRef.current, sesiones: historial, pesos: registrosPeso, nombres: [...nombres], overrides, asistencia }
+    ultimaReqRef.current = req
     setCalculando(true)
     const aplicar = (res: MeamWorkerResponse) => {
       if (res.id !== reqIdRef.current) return
@@ -77,7 +78,12 @@ export default function MeamPage() {
         if (!workerRef.current) {
           workerRef.current = new Worker(new URL('../meam/meam.worker.ts', import.meta.url), { type: 'module' })
           workerRef.current.onmessage = (ev: MessageEvent<MeamWorkerResponse>) => aplicar(ev.data)
-          workerRef.current.onerror = (e) => { console.warn('[MEAM] worker no disponible, calculando en el hilo principal:', e.message); aplicar(calcularInforme(req)) }
+          workerRef.current.onerror = (e) => {
+            console.warn('[MEAM] worker no disponible, calculando en el hilo principal:', e.message)
+            workerRef.current?.terminate(); workerRef.current = null
+            const ultima = ultimaReqRef.current
+            if (ultima) setTimeout(() => aplicar(calcularInforme(ultima)), 0)
+          }
         }
         workerRef.current.postMessage(req)
         return
