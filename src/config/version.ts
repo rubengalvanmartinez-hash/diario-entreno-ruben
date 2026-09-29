@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.8.0'
+export const APP_VERSION = '2.8.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,19 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.8.1',
+    fecha: '29/09/2026',
+    tipo: 'menor',
+    cambios: [
+      'Evidencia de adaptación: botón "Copiar informe" (texto compacto con lo mismo que cada tarjeta y su "¿Por qué?", con códigos internos entre corchetes)',
+      '"¿Por qué?" con escalas por tramos en todos los números (T, D, ruido, inercia, cambio, volumen; por ejercicio: pendiente, mínimo detectable, sesiones del bloque, ruido medido, ventana), con los umbrales del motor como cortes',
+      'Por ejercicio se ve cuántas sesiones tiene registradas, cuántas cuentan en el bloque actual y por qué empieza ahí (parón de N días o cambio de nivel), cuántas no tienen fuerza estimada (más de 12 reps, sin kilos o sin peso corporal) y cuáles son de esta semana; los que no llegan a 3 en su bloque salen en "Sin evaluar" y los músculos sin ninguno en "Sin tarjeta todavía"',
+      'Datos apartados como errata: fecha, marca apuntada, fuerza estimada y esperada, con enlace que abre esa sesión en el Historial',
+      'Cuando un músculo no se puede evaluar se explica el motivo real con nombres (un ejercicio recién vuelto de un parón de 21–42 días lo bloquea; sin sesiones nuevas el estado se queda como estaba; ningún ejercicio directo con 8 sesiones normales…) en vez de "no hay datos suficientes"; la fiabilidad baja dice qué ejercicio la causa; aviso cuando un músculo lleva más de 14 días sin entrenar (el estado es el de entonces)',
+      'Los ejercicios que el mapa no reconoce (músculo "otros") vuelven a listarse como sin músculo asignado (antes desaparecían sin aviso)',
+    ],
+  },
   {
     version: '2.8.0',
     fecha: '28/09/2026',
