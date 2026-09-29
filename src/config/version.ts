@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.7.0'
+export const APP_VERSION = '2.8.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,22 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.8.0',
+    fecha: '28/09/2026',
+    tipo: 'mayor',
+    cambios: [
+      'NUEVO: "Evidencia de adaptación por músculo" (botón en Tendencias): motor estadístico MEAM v2.3 que evalúa cada músculo a fecha de corte semanal (lunes) con estado (Mejorando / Estable / Bajando / Regresión probable / Sin datos), fiabilidad, qué hacer y detalle "¿Por qué?" (T, D, σ, ρ, cambio en kg, mínimo detectable en kg/mes por ejercicio)',
+      'Pantalla pensada para quien no sabe de entrenamiento: pictograma y color semáforo por músculo, una frase en llano, resumen arriba (cuántos mejoran, cuántos bajan, señales de cansancio), fiabilidad en tres puntos con el motivo cuando es baja, botón de ayuda y cada número del "¿Por qué?" con su explicación',
+      'Aviso "sin récord en las últimas 6 sesiones": se compara dentro del bloque actual (un parón de más de 6 semanas o un cambio de máquina abre bloque nuevo) y contra la mejor marca de las 12 sesiones anteriores, no contra el máximo de todo el histórico (salía en todos los ejercicios); muestra la marca a batir y el número de sesiones del bloque con su fecha de inicio. Tras un parón, las primeras sesiones ya no se descartan como erratas por rendir menos',
+      'Fiabilidad: ya no se marca "baja" solo por no tener aún 3 ejercicios con 20 sesiones en 16 semanas (a 1 sesión/semana era inalcanzable y dejaba toda la pantalla sin recomendación); el motor ya usa un valor prudente de ρ en ese caso, así que solo se veta "alta". "Baja" queda para motivos reales: pocas sesiones, ejercicios que se contradicen, parón o cambio de rango reciente. La recomendación se muestra siempre',
+      'Fatiga: detecta caídas persistentes con contexto de carga alta o en varios ejercicios, propone una descarga y comprueba el rebote; el tipo de sesión (Normal / Descarga) se marca en la sesión activa (junto al gimnasio) o desde el Historial en sesiones pasadas',
+      'Datos: series → exposición con calentamiento inferido (carga < 90 % de la máxima), top set entre las 3 primeras series de trabajo, filtro de erratas (> 25 %), descarga inferida (pocas series y carga baja), RIR solo del top set, asistidos con peso corporal (dominadas), una exposición por día',
+      'Mapa ejercicio → músculo/cluster por palabras clave (dominadas y fondos sin asistencia se tratan como peso corporal + lastre); las correcciones se guardan en la tabla meam_variants (por SQL en esta versión; pantalla de edición en la siguiente); lista de ejercicios sin asignar en la propia pantalla',
+      'Snapshots semanales inmutables (meam_snapshots, con versión de modelo/config e input_hash), calculados en un hilo aparte (Web Worker) y solo con semanas completas; ejecutar supabase_v2.8.0_meam.sql (añade entrenos.tipo_sesion y las dos tablas; sin índices ni borrados). Sin el SQL la app sigue funcionando, pero no guarda tipo de sesión ni snapshots',
+      'Verificación: el núcleo TypeScript reproduce la implementación de referencia Python snapshot a snapshot (381 snapshots dorados de 16 escenarios + 431 de la auditoría externa) y añade tests de la capa de datos (test-meam.mts); auditoría externa de la integración con dos bloqueantes corregidos (rendimiento ×8 y SQL seguro)',
+    ],
+  },
   {
     version: '2.7.0',
     fecha: '26/09/2026',

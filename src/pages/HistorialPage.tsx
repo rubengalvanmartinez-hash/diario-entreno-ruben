@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { useHistorialRef } from '../hooks/useHistorialRef'
 import type { Sesion } from '../types/models'
 import { ResumenSesion, DIA_NOMBRE } from './SesionPage'
+import { getIdActivo, sincronizarEntrenoSupabase } from '../services/supabase'
 
 // ── Utilidades de fecha (todo en fecha local, formato ISO YYYY-MM-DD) ─────────
 
@@ -48,11 +49,15 @@ export default function HistorialPage() {
   const historialRef = useHistorialRef()
   // Historial "crudo" (kg reales de cada gimnasio) para mostrar las series
   const historialCrudo = useFitLogStore(useShallow((s) => s.historialSesiones))
+  const cambiarTipoSesionHistorial = useFitLogStore((s) => s.cambiarTipoSesionHistorial)
+  const marcarSincronizada = useFitLogStore((s) => s.marcarSesionSincronizada)
 
   // Desplazamiento en bloques de 8 semanas (0 = las últimas 8)
   const [offset, setOffset] = useState(0)
   const [diaSel, setDiaSel] = useState<string | null>(null)
   const [sesionSel, setSesionSel] = useState<Sesion | null>(null)
+  // enlace profundo desde MEAM (?fecha=YYYY-MM-DD&sesion=<id>): abre ese día y esa sesión una sola vez, cuando el historial ya está cargado
+  const [params] = useSearchParams()
 
   const hoyIso = isoLocal(new Date())
 
@@ -66,6 +71,20 @@ export default function HistorialPage() {
     }
     return map
   }, [historialCrudo])
+
+  // Se aplica ajustando el estado durante el render (patrón de React para estado derivado), no en un efecto
+  const fechaEnlace = params.get('fecha'); const sesionEnlace = params.get('sesion')
+  const claveEnlace = fechaEnlace && /^\d{4}-\d{2}-\d{2}$/.test(fechaEnlace) ? `${fechaEnlace}|${sesionEnlace ?? ''}` : ''
+  const [enlaceAplicado, setEnlaceAplicado] = useState('')
+  const sesionesEnlace = fechaEnlace ? (porFecha.get(fechaEnlace) ?? []) : []
+  if (claveEnlace && claveEnlace !== enlaceAplicado && sesionesEnlace.length > 0) {
+    setEnlaceAplicado(claveEnlace)
+    const [y, m, d] = (fechaEnlace as string).split('-').map(Number)
+    const semanasAtras = Math.round((lunesDe(new Date()).getTime() - lunesDe(new Date(y, m - 1, d)).getTime()) / (7 * 86400000))
+    setOffset(Math.max(0, Math.floor(semanasAtras / SEMANAS_VISIBLES)))
+    setDiaSel(fechaEnlace)
+    setSesionSel(sesionesEnlace.find((s) => s.id === sesionEnlace) ?? (sesionesEnlace.length === 1 ? sesionesEnlace[0] : null))
+  }
 
   // Semanas a mostrar (de la más antigua a la más reciente)
   const semanas = useMemo(() => {
@@ -260,6 +279,30 @@ export default function HistorialPage() {
         <p className="text-center text-sm text-zinc-500 py-6">
           Todavía no hay entrenos guardados. Cuando completes una sesión aparecerá aquí.
         </p>
+      )}
+
+      {/* Tipo de sesión (MEAM): marcar una sesión pasada como descarga */}
+      {sesionSel && (
+        <div className="mx-0 mb-2 flex items-center justify-between rounded-2xl bg-zinc-900 border border-zinc-800 px-4 py-2">
+          <span className="text-[11px] text-zinc-400">Tipo de sesión para el análisis</span>
+          <button
+            onClick={() => {
+              const t = sesionSel.tipoSesion === 'deload' ? 'normal' : 'deload'
+              const actualizada = cambiarTipoSesionHistorial(sesionSel.id, t)
+              if (actualizada) {
+                setSesionSel(actualizada)
+                const uid = getIdActivo()
+                if (uid) sincronizarEntrenoSupabase(uid, actualizada).then(() => marcarSincronizada(actualizada.id)).catch((e) => console.warn('[MEAM] no se pudo sincronizar el tipo de sesión:', e))
+              }
+            }}
+            className={[
+              'text-[11px] font-bold rounded-full px-3 py-1 leading-none',
+              sesionSel.tipoSesion === 'deload' ? 'bg-sky-500/15 text-sky-400' : 'bg-zinc-800 text-zinc-400',
+            ].join(' ')}
+          >
+            {sesionSel.tipoSesion === 'deload' ? '↓ Descarga' : 'Normal'}
+          </button>
+        </div>
       )}
 
       {/* Informe del día (mismo componente que el resumen de fin de sesión) */}

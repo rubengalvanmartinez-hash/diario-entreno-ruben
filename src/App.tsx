@@ -9,6 +9,7 @@ import TendenciasPage      from './pages/TendenciasPage'
 import MedidasPage            from './pages/MedidasPage'
 import ProgresoCorporalPage  from './pages/ProgresoCorporalPage'
 import HistorialPage         from './pages/HistorialPage'
+import MeamPage              from './pages/MeamPage'
 import LoginPage           from './pages/LoginPage'
 import AdminUsuariosPage   from './pages/AdminUsuariosPage'
 import DebugSupabasePage   from './pages/DebugSupabasePage'
@@ -94,6 +95,7 @@ const router = createBrowserRouter([
       { path: 'medidas',            element: <MedidasPage />           },
       { path: 'progreso-corporal', element: <ProgresoCorporalPage />  },
       { path: 'historial',          element: <HistorialPage />         },
+      { path: 'meam',               element: <MeamPage />              },
     ],
   },
 ])

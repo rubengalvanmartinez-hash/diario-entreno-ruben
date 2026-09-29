@@ -13,6 +13,7 @@ import type {
   RegistroMedidas,
   PerfilCorporal,
   CategoriaImc,
+  TipoSesionMeam,
 } from '../types/models'
 import { serieConDatos } from '../types/models'
 import { DEFAULT_EJERCICIOS, esConfigPorDefecto } from '../store/defaultData'
@@ -318,11 +319,31 @@ async function insertarEntrenos(rows: Record<string, unknown>[], origen: string)
   const { error } = await supabase.from('entrenos').insert(rows)
   if (!error) return
   const msg = String(error.message ?? '')
-  if (error.code === 'PGRST204' || /gimnasio/i.test(msg)) {
-    console.warn(`[Supabase] ${origen}: la columna gimnasio no existe aún — reintentando sin ella (pendiente ejecutar el SQL de v2.5.0)`)
-    const sinGimnasio = rows.map((r) => { const copia = { ...r }; delete copia.gimnasio; return copia })
-    const { error: error2 } = await supabase.from('entrenos').insert(sinGimnasio)
+  // Columnas opcionales que pueden no existir todavía (SQL pendiente): gimnasio (v2.5.0) y tipo_sesion (v2.8.0 MEAM).
+  // Se reintenta quitando la columna que falte (una o las dos).
+  if (error.code === 'PGRST204' || /gimnasio|tipo_sesion/i.test(msg)) {
+    // PGRST204 cita la columna que falta ("Could not find the 'tipo_sesion' column…"); si no cita ninguna, quitar las dos
+    const citaAlguna = /gimnasio|tipo_sesion/i.test(msg)
+    const faltaTipo = /tipo_sesion/i.test(msg) || !citaAlguna
+    const faltaGim  = /gimnasio/i.test(msg) || !citaAlguna
+    let reducidas = rows
+    if (faltaTipo) {
+      console.warn(`[Supabase] ${origen}: la columna tipo_sesion no existe aún — reintentando sin ella (pendiente ejecutar el SQL de v2.8.0 MEAM)`)
+      reducidas = reducidas.map((r) => { const copia = { ...r }; delete copia.tipo_sesion; return copia })
+    }
+    if (faltaGim) {
+      console.warn(`[Supabase] ${origen}: la columna gimnasio no existe aún — reintentando sin ella (pendiente ejecutar el SQL de v2.5.0)`)
+      reducidas = reducidas.map((r) => { const copia = { ...r }; delete copia.gimnasio; return copia })
+    }
+    const { error: error2 } = await supabase.from('entrenos').insert(reducidas)
     if (!error2) return
+    if (!faltaGim && (error2.code === 'PGRST204' || /gimnasio/i.test(String(error2.message ?? '')))) {
+      const sinGim = reducidas.map((r) => { const copia = { ...r }; delete copia.gimnasio; return copia })
+      const { error: error3 } = await supabase.from('entrenos').insert(sinGim)
+      if (!error3) return
+      console.error(`[Supabase] ${origen} INSERT:`, error3)
+      throw error3
+    }
     console.error(`[Supabase] ${origen} INSERT:`, error2)
     throw error2
   }
@@ -363,6 +384,7 @@ export async function sincronizarEntrenoSupabase(
       nota: ej.notaSesion || null,
       ayuda_fede: ej.ayudaFede ?? false,
       gimnasio: sesion.gimnasio ?? null,
+      tipo_sesion: sesion.tipoSesion ?? null,
     })),
   )
   if (rows.length === 0) return
@@ -375,7 +397,7 @@ export async function sincronizarEntrenoSupabase(
  */
 export async function sincronizarEjercicioSupabase(
   usuarioId: string,
-  sesion: Pick<Sesion, 'id' | 'fecha' | 'dia' | 'gimnasio'>,
+  sesion: Pick<Sesion, 'id' | 'fecha' | 'dia' | 'gimnasio' | 'tipoSesion'>,
   ejercicio: SesionEjercicio,
 ): Promise<void> {
   const nombreEj = ejercicio.nombreSustituido ?? ejercicio.nombreSnapshot
@@ -403,6 +425,7 @@ export async function sincronizarEjercicioSupabase(
     nota: ejercicio.notaSesion || null,
     ayuda_fede: ejercicio.ayudaFede ?? false,
     gimnasio: sesion.gimnasio ?? null,
+    tipo_sesion: sesion.tipoSesion ?? null,
   }))
   if (rows.length === 0) return
   await insertarEntrenos(rows, 'sincronizarEjercicioSupabase')
@@ -450,6 +473,7 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
     fecha: string
     dia: string
     gimnasio: GimnasioId | undefined
+    tipoSesion: TipoSesionMeam | undefined
     ejercicios: Map<string, { rows: Record<string, unknown>[] }>
   }
   const sesionMap = new Map<string, SesionAccum>()
@@ -459,10 +483,12 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
       sesionMap.set(row.sesion_id, {
         fecha: row.fecha, dia: row.dia,
         gimnasio: row.gimnasio === 'fitnesspark' ? 'fitnesspark' : undefined,
+        tipoSesion: row.tipo_sesion === 'deload' || row.tipo_sesion === 'rehab' || row.tipo_sesion === 'test' ? row.tipo_sesion : undefined,
         ejercicios: new Map(),
       })
     }
     const s = sesionMap.get(row.sesion_id)!
+    if (!s.tipoSesion && (row.tipo_sesion === 'deload' || row.tipo_sesion === 'rehab' || row.tipo_sesion === 'test')) s.tipoSesion = row.tipo_sesion
     if (!s.ejercicios.has(row.ejercicio)) {
       s.ejercicios.set(row.ejercicio, { rows: [] })
     }
@@ -507,6 +533,7 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
     sesiones.push({
       id: sesionId, fecha: datos.fecha, dia, tipo, ejercicios, sincronizado: true,
       ...(datos.gimnasio ? { gimnasio: datos.gimnasio } : {}),
+      ...(datos.tipoSesion ? { tipoSesion: datos.tipoSesion } : {}),
     })
   }
 

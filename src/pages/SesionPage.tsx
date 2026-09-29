@@ -231,6 +231,7 @@ export default function SesionPage() {
 
   const historialSesiones  = useHistorialRef()  // kg Entrena-T equivalentes
   const cambiarGimnasioSesionActiva = useFitLogStore((s) => s.cambiarGimnasioSesionActiva)
+  const cambiarTipoSesionActiva = useFitLogStore((s) => s.cambiarTipoSesionActiva)
   const todosLosEjercicios = useFitLogStore(useShallow((s) => s.ejercicios))
   const [showLista,           setShowLista]           = useState(false)
   const [showCompletado,      setShowCompletado]      = useState(false)
@@ -407,6 +408,17 @@ export default function SesionPage() {
                 ].join(' ')}
               >
                 📍 {GIMNASIOS[sesionActiva.gimnasio ?? 'entrenat'].corto}
+              </button>
+              <button
+                onClick={() => cambiarTipoSesionActiva(sesionActiva.tipoSesion === 'deload' ? 'normal' : 'deload')}
+                title={sesionActiva.tipoSesion === 'deload' ? 'Sesión de descarga (tocar para volver a normal)' : 'Marcar como sesión de descarga'}
+                aria-label={sesionActiva.tipoSesion === 'deload' ? 'Sesión de descarga' : 'Marcar como descarga'}
+                className={[
+                  'text-[10px] font-bold rounded-full px-2 py-0.5 leading-none whitespace-nowrap',
+                  sesionActiva.tipoSesion === 'deload' ? 'bg-sky-500/15 text-sky-400' : 'bg-zinc-800 text-zinc-500',
+                ].join(' ')}
+              >
+                {sesionActiva.tipoSesion === 'deload' ? '↓ Descarga' : '↓ Normal'}
               </button>
             </div>
             <div className="mt-1 flex items-center gap-2">

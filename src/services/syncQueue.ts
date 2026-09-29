@@ -7,7 +7,7 @@ import { sincronizarEjercicioSupabase } from './supabase'
 
 export type SyncStatus = 'syncing' | 'synced' | 'error' | 'offline'
 
-type SesionInfo = Pick<Sesion, 'id' | 'fecha' | 'dia' | 'gimnasio'>
+type SesionInfo = Pick<Sesion, 'id' | 'fecha' | 'dia' | 'gimnasio' | 'tipoSesion'>
 
 interface EjercicioOp {
   id: string

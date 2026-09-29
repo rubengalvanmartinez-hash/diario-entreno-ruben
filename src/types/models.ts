@@ -78,6 +78,12 @@ export interface SesionEjercicio {
 
 export type TipoSesion = 'normal' | 'parcial' | 'extra'
 
+/**
+ * Tipo de sesión para el motor MEAM: 'deload' (descarga), 'rehab' o 'test' se excluyen de las estimaciones de
+ * tendencia y ruido y sirven como evento de "reducción del estímulo". undefined = 'normal'.
+ */
+export type TipoSesionMeam = 'normal' | 'deload' | 'rehab' | 'test'
+
 export interface Sesion {
   id: string
   /** ISO 8601, ej. "2026-04-01" */
@@ -87,6 +93,8 @@ export interface Sesion {
   tipo?: TipoSesion
   /** Gimnasio donde se hizo la sesión; undefined = Entrena-T (referencia) */
   gimnasio?: GimnasioId
+  /** Descarga / rehabilitación / test (MEAM); undefined = normal. Se persiste en entrenos.tipo_sesion */
+  tipoSesion?: TipoSesionMeam
   ejercicios: SesionEjercicio[]
   sincronizado: boolean
 }
