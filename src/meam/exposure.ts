@@ -39,6 +39,8 @@ export interface ExposureExtra {
   tipo: SessionType
   errata: boolean
   bwRef: number | null
+  /** e1RM esperado (mediana de las 5 exposiciones normales previas) cuando se aparta como errata; null si no aplica */
+  e1rmEsperado: number | null
 }
 
 export interface DerivedVariant {
@@ -58,6 +60,12 @@ export interface DerivedVariant {
   bloqueDesde: string | null
   /** rupturas de protocolo propuestas (t): ≥3 "erratas" consecutivas del mismo signo = nuevo nivel (otra máquina, kg por lado…) */
   rupturasPropuestas: number[]
+  /** sesiones registradas con el ejercicio (con alguna serie con datos), tengan o no exposición: para explicar «N registradas, M cuentan» */
+  nRegistros: number
+  /** sesiones sin e1RM porque las 3 primeras series de trabajo pasan del máximo de reps (12; 20 en aislamiento) */
+  nSinE1rmPorReps: number
+  /** sesiones sin e1RM por no tener carga utilizable (sin kilos o sin reps apuntados, o asistido/lastre sin peso corporal registrado) */
+  nSinE1rmPorCarga: number
 }
 
 export interface SemanaVolumen { lunes: string; semana: number; series: number; duras: number }
@@ -144,8 +152,9 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
   for (const f of filas) {
     let meta = mapa.get(f.key)
     if (!meta) { sinMapa.add(f.nombre); meta = { key: f.key, nombre: f.nombre, musculo: 'otros', cluster: 'OTROS', role: 'DIRECT', equipment: 'compound_free', esAsistencia: false, aislamiento: false, inferido: true } }
-    if (!variantes.has(f.key)) variantes.set(f.key, { meta, exps: [], extras: [], erratas: [], repsSinE1rm: [], sinMejoraEn6: false, mejorMarca: null, bloqueDesde: null, rupturasPropuestas: [] })
+    if (!variantes.has(f.key)) variantes.set(f.key, { meta, exps: [], extras: [], erratas: [], repsSinE1rm: [], sinMejoraEn6: false, mejorMarca: null, bloqueDesde: null, rupturasPropuestas: [], nRegistros: 0, nSinE1rmPorReps: 0, nSinE1rmPorCarga: 0 })
     const dv = variantes.get(f.key)!
+    dv.nRegistros++
     const t = tDe(f.fecha)
     // --- volumen semanal por músculo (series con datos y series duras) ---
     const lunes = lunesDeIso(f.fecha)
@@ -167,6 +176,7 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
       // sin peso corporal disponible (asistido/lastre) ⇒ canal de reps (P3)
       const reps = Math.max(0, ...f.series.map((s) => (s.reps === '' ? 0 : Number(s.reps))))
       if (reps > 0) dv.repsSinE1rm.push([t, reps])
+      dv.nSinE1rmPorCarga++
       sv.series += f.series.length; sv.duras += f.series.filter((s) => s.etiqueta !== undefined).length
       continue
     }
@@ -175,6 +185,7 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
       // peso corporal puro sin BW_ref (carga 0): canal de reps (P3), sin e1RM
       const reps = Math.max(...conCarga.map((x) => x.reps))
       dv.repsSinE1rm.push([t, reps])
+      dv.nSinE1rmPorCarga++
       sv.series += f.series.length; sv.duras += f.series.filter((s) => s.etiqueta !== undefined).length
       continue
     }
@@ -185,6 +196,7 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
     const candidatas = trabajo.slice(0, CFG.n_sets_top).filter((x) => x.reps <= repsMax)
     if (candidatas.length === 0) {
       dv.repsSinE1rm.push([t, Math.max(...trabajo.map((x) => x.reps))])
+      dv.nSinE1rmPorReps++
       continue
     }
     let top = candidatas[0]
@@ -207,15 +219,16 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
     // --- errata (causal, mediana de las 5 exposiciones normales previas). Una descarga baja la carga a propósito: no se evalúa.
     //     Tres "erratas" consecutivas del mismo signo = cambio real de nivel (otra máquina, kg por lado → total): se aceptan las tres,
     //     se propone una ruptura de protocolo en la primera y la referencia pasa al nuevo nivel (auditoría 6) ---
-    let errata = false
+    let errata = false; let e1rmEsperado: number | null = null
     if (tipo === 'normal' && h.lnE1rm.length >= 3) {
       const ref = median(h.lnE1rm.slice(-5))
       errata = Math.abs(y - ref) > CFG.errata_log_dev
+      if (errata) e1rmEsperado = Math.exp(ref)
     }
     const extra: ExposureExtra = {
       fecha: f.fecha, sesionId: f.sesionId, t, e1rm, topReps: top.reps, topLoad: top.carga as number, rir: rirDeEtiqueta(top.s),
       seriesTrabajo: trabajo.length, seriesDuras: trabajo.filter((x) => x.s.etiqueta !== undefined).length, seriesTotales: f.series.length,
-      deloadInferido: deloadInf, tipo, errata, bwRef: bw,
+      deloadInferido: deloadInf, tipo, errata, bwRef: bw, e1rmEsperado,
     }
     if (errata) {
       const signo = y > median(h.lnE1rm.slice(-5)) ? 1 : -1
@@ -224,7 +237,7 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
         // nuevo nivel: readmitir la racha como exposiciones, ruptura en la primera, referencia = nuevo nivel
         dv.rupturasPropuestas.push(h.racha[0].t)
         for (const r of h.racha) {
-          r.errata = false
+          r.errata = false; r.e1rmEsperado = null
           dv.exps.push(makeExposure({ t: r.t, y: Math.log(r.e1rm), session_type: r.tipo, reps_typical: r.topReps, load_kg: r.topLoad }))
           dv.extras.push(r)
           h.sets.push(r.seriesTrabajo); h.loads.push(r.topLoad); h.fechas.push(r.fecha)

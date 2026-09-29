@@ -15,7 +15,7 @@ import { nombreCanonico } from '../utils/normalizar'
 import type { GrupoId } from '../utils/gruposMusculares'
 import { ICONO_GRUPO, COLOR_GRUPO } from '../components/gruposUI'
 import type { VariantOverride, MeamMuscle } from '../meam/variants'
-import type { InformeMeam, InformeMusculo, InformeEjercicio, Confianza } from '../meam/run'
+import type { InformeMeam, InformeMusculo, InformeEjercicio, EjercicioFuera, Confianza } from '../meam/run'
 import { cargarVariantesRevisadas, guardarSnapshots } from '../meam/services'
 import { MEAM_CONFIG } from '../meam/config'
 
@@ -61,8 +61,27 @@ const FIABILIDAD: Record<Confianza, { puntos: number; label: string; color: stri
   INSUFICIENTE: { puntos: 0, label: 'sin datos', color: '#71717a' },
 }
 
-const TIER: Record<string, string> = { NONE: 'sin datos', PROVISIONAL: 'pocas sesiones', ESTABLISHED: 'establecido', MATURE: 'maduro' }
-const CALIDAD: Record<string, string> = { REGULAR: 'ritmo regular', IRREGULAR: 'ritmo irregular', ESCASA: 'pocas sesiones' }
+const TIER: Record<string, string> = { NONE: 'ruido sin medir', PROVISIONAL: 'ruido poco medido', ESTABLISHED: 'ruido establecido', MATURE: 'ruido maduro' }
+const CALIDAD: Record<string, string> = { REGULAR: 'ritmo regular', IRREGULAR: 'ritmo irregular (huecos grandes o desiguales)', ESCASA: 'ventana corta (menos de 8 sesiones o de 8 semanas)' }
+
+/** Tramos de una escala: el valor cae en el primer tramo cuyo `hasta` no alcanza. Los cortes son los umbrales del motor (config) o, donde no los hay, rangos orientativos. */
+interface Tramo { hasta: number; label: string; color: string }
+const C = { verde: '#4ade80', gris: '#a1a1aa', ambar: '#fbbf24', rojo: '#f87171', azul: '#60a5fa' }
+const ESC_T: Tramo[] = [{ hasta: -MEAM_CONFIG.T_enter, label: 'bajada clara', color: C.rojo }, { hasta: -MEAM_CONFIG.T_stay, label: 'apunta a bajada, no concluyente', color: C.ambar }, { hasta: MEAM_CONFIG.T_stay, label: 'no se distingue del ruido', color: C.gris }, { hasta: MEAM_CONFIG.T_enter, label: 'apunta a mejora, no concluyente', color: C.ambar }, { hasta: Infinity, label: 'mejora clara', color: C.verde }]
+const ESC_D: Tramo[] = [{ hasta: MEAM_CONFIG.D_enter, label: 'claramente por debajo: primer aviso de cansancio', color: C.rojo }, { hasta: -0.5, label: 'algo por debajo de lo esperado', color: C.ambar }, { hasta: 0.5, label: 'como se esperaba', color: C.gris }, { hasta: 1, label: 'algo por encima de lo esperado', color: C.verde }, { hasta: Infinity, label: 'claramente por encima de lo esperado', color: C.verde }]
+// σ, pendiente y mínimo detectable no tienen umbral en el motor: tramos orientativos anclados en los priors (1,8 % compuestos / 2,5 % aislamiento) y en la batería dorada; pendientes de recalibrar con snapshots reales (F3)
+const ESC_SIGMA: Tramo[] = [{ hasta: 1.5, label: 'muy bajo: se verían cambios pequeños', color: C.verde }, { hasta: 2.5, label: 'normal', color: C.gris }, { hasta: 4, label: 'alto: solo se ven cambios grandes', color: C.ambar }, { hasta: Infinity, label: 'muy alto: revisa cómo apuntas (reps, kilos, RIR)', color: C.rojo }]
+const ESC_RHO: Tramo[] = [{ hasta: 0.15, label: 'sin inercia: cada día va por libre', color: C.verde }, { hasta: 0.3, label: 'algo de inercia', color: C.gris }, { hasta: Infinity, label: 'mucha inercia: los días flojos se encadenan', color: C.ambar }]
+const ESC_VOL: Tramo[] = [{ hasta: MEAM_CONFIG.volume_very_low_percentile, label: 'muy bajo para ti', color: C.rojo }, { hasta: MEAM_CONFIG.volume_low_percentile, label: 'bajo para ti', color: C.ambar }, { hasta: MEAM_CONFIG.volume_high_percentile, label: 'normal en ti', color: C.gris }, { hasta: Infinity, label: 'alto para ti: cuenta como carga alta', color: C.azul }]
+const ESC_PEND: Tramo[] = [{ hasta: -0.4, label: 'bajando rápido', color: C.rojo }, { hasta: -0.2, label: 'bajando', color: C.rojo }, { hasta: -0.05, label: 'bajando poco a poco', color: C.ambar }, { hasta: 0.05, label: 'plano', color: C.gris }, { hasta: 0.2, label: 'subiendo poco a poco', color: C.verde }, { hasta: 0.4, label: 'buen ritmo', color: C.verde }, { hasta: Infinity, label: 'subiendo rápido', color: C.verde }]
+/** mínimo detectable en % de la fuerza estimada al mes */
+const ESC_MDS: Tramo[] = [{ hasta: 1, label: 'fino: se verían cambios pequeños', color: C.verde }, { hasta: 1.7, label: 'normal', color: C.gris }, { hasta: 3, label: 'grueso: solo se verían cambios grandes', color: C.ambar }, { hasta: Infinity, label: 'muy grueso: solo se verían cambios muy grandes', color: C.rojo }]
+/** sesiones con fuerza estimada en el bloque actual, frente a lo que necesita el motor */
+const ESC_NBLOQUE: Tramo[] = [{ hasta: 3, label: 'no cuenta aún', color: C.rojo }, { hasta: MEAM_CONFIG.N_state_min, label: 'arrancando: sin tendencia hasta 8', color: C.ambar }, { hasta: MEAM_CONFIG.tier_mature, label: 'evaluable', color: C.gris }, { hasta: MEAM_CONFIG.N_state, label: 'sólido', color: C.verde }, { hasta: Infinity, label: 'ventana llena: solo cuentan las últimas 32', color: C.verde }]
+/** semanas que abarca la ventana de la tendencia de un ejercicio */
+const ESC_VENTANA: Tramo[] = [{ hasta: MEAM_CONFIG.state_span_min_weeks, label: 'demasiado corta', color: C.rojo }, { hasta: MEAM_CONFIG.tq_min_span_weeks, label: 'corta', color: C.ambar }, { hasta: 12, label: 'media', color: C.gris }, { hasta: Infinity, label: 'completa', color: C.verde }]
+const ESC_NERR: Tramo[] = [{ hasta: 1, label: 'sin medir: se usa la media de tus ejercicios', color: C.rojo }, { hasta: MEAM_CONFIG.tier_established, label: 'pocas: se mezcla con la media de tus ejercicios', color: C.ambar }, { hasta: MEAM_CONFIG.tier_mature, label: 'establecido', color: C.gris }, { hasta: Infinity, label: 'maduro', color: C.verde }]
+const tramoDe = (valor: number, tramos: Tramo[]): Tramo | null => (Number.isFinite(valor) ? (tramos.find((t) => valor < t.hasta) ?? tramos[tramos.length - 1]) : null)
 const estratoLegible = (s: string): string => (s.startsWith('r') ? `${s.slice(1).replace('-', '–')} reps` : s)
 /** Etiquetas y avisos del motor en lenguaje llano; los no listados salen en minúsculas con espacios. */
 const GLOSARIO: Record<string, string> = {
@@ -101,7 +120,7 @@ const FASE: Record<InformeMeam['faseNutricional'], string> = { deficit: 'perdien
 
 const fmt = (x: number, d = 2): string => (Number.isFinite(x) ? x.toFixed(d) : '—')
 /** «150 kg × 10», «+10 kg de lastre × 8» o «25 kg de ayuda × 8»: siempre lo que el usuario apuntó, no la carga efectiva */
-const marcaLegible = (m: NonNullable<InformeEjercicio['mejorMarca']>): string =>
+const marcaLegible = (m: { pesoRegistrado: number; tipoCarga: 'peso' | 'ayuda' | 'lastre'; topReps: number }): string =>
   m.tipoCarga === 'ayuda' ? `${fmt(m.pesoRegistrado, 1)} kg de ayuda × ${m.topReps}` : m.tipoCarga === 'lastre' ? `${m.pesoRegistrado > 0 ? '+' : ''}${fmt(m.pesoRegistrado, 1)} kg de lastre × ${m.topReps}` : `${fmt(m.pesoRegistrado, 1)} kg × ${m.topReps}`
 const signo = (x: number, d = 2): string => (Number.isFinite(x) ? `${x >= 0 ? '+' : ''}${x.toFixed(d)}` : '—')
 const fechaCorta = (iso: string): string => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}` }
@@ -117,28 +136,35 @@ function informeTexto(inf: InformeMeam): string {
     L.push('')
     L.push(`## ${m.nombre}: ${SEMAFORO[semaforoDe(m)].label} [${m.estado}${m.etiqueta ? `/${m.etiqueta}` : ''}] · fiabilidad ${FIABILIDAD[m.confianza].label}${m.motivosConfianza.length ? ` (${m.motivosConfianza.join('; ')})` : ''}`)
     L.push(`Texto: ${m.textoUsuario}`)
+    if (m.motivoInconcluyente) L.push(`Por qué no se evalúa: ${m.motivoInconcluyente}`)
+    if (m.ultimaSesion) L.push(`Última sesión del músculo: ${fechaCorta(m.ultimaSesion)} (${m.diasSinSesion} días antes del corte${m.diasSinSesion > 14 ? '; estado congelado desde entonces' : ''})`)
     if (rec) L.push(`Recuperación: ${rec.label} [${m.recuperacion}${m.etiquetaRecuperacion ? `/${m.etiquetaRecuperacion}` : ''}]`)
     else if (m.etiquetaRecuperacion) L.push(`Recuperación: ${legible(m.etiquetaRecuperacion)} [${m.etiquetaRecuperacion}]`)
     if (m.accion) L.push(`Acción: ${m.accion}`)
-    L.push(`T ${signo(m.T)} · D ${signo(m.D)} · σ ${fmt(m.sigmaPct)} % · ρ ${fmt(m.rho)}${m.rhoCalibrado ? '' : ' (por defecto)'} · ventana ${Number.isFinite(nSem) ? nSem : '—'} sem · cambio ${m.cambioKg ? `${signo(m.cambioKg[0], 1)} a ${signo(m.cambioKg[1], 1)} kg` : '—'}`)
-    L.push(`Volumen ${fmt(m.volumenSeriesSemana, 0)} series/sem${Number.isFinite(m.volumenPercentil) ? ` (P${fmt(m.volumenPercentil, 0)})` : ''}${m.contextoAlto ? ' · carga alta' : ''} · ${fmt(m.frecuenciaSemanal, 1)} sesiones/sem · ${m.nExposicionesTotal} exposiciones`)
+    const z = (t: Tramo | null): string => (t ? ` [${t.label}]` : '')
+    L.push(`T ${signo(m.T)}${z(tramoDe(m.T, ESC_T))} · D ${signo(m.D)}${z(tramoDe(m.D, ESC_D))} · σ ${fmt(m.sigmaPct)} %${z(tramoDe(m.sigmaPct, ESC_SIGMA))} · ρ ${fmt(m.rho)}${m.rhoCalibrado ? '' : ' (por defecto)'}${z(tramoDe(m.rho, ESC_RHO))} · ventana ${Number.isFinite(nSem) ? nSem : '—'} sem · cambio ${m.cambioKg ? `${signo(m.cambioKg[0], 1)} a ${signo(m.cambioKg[1], 1)} kg [${m.cambioKg[0] > 0 ? 'subida clara' : m.cambioKg[1] < 0 ? 'bajada clara' : 'incluye 0'}]` : '—'}`)
+    L.push(`Volumen ${fmt(m.volumenSeriesSemana, 0)} series/sem${Number.isFinite(m.volumenPercentil) ? ` (P${fmt(m.volumenPercentil, 0)})${z(tramoDe(m.volumenPercentil, ESC_VOL))}` : ''}${m.contextoAlto ? ' · carga alta' : ''} · ${fmt(m.frecuenciaSemanal, 1)} sesiones/sem · ${m.nExposicionesTotal} exposiciones`)
     if (m.flags.length) L.push(`Avisos: ${m.flags.map((f) => `${legible(f)} [${f}]`).join(', ')}`)
     for (const e of m.ejercicios) {
       const p: string[] = [
-        `T ${signo(e.T)}`, `${signo(e.pendientePctSem)} %/sem`, `e1RM ${fmt(e.e1rmActual, 1)} kg`, `mín. detectable ${fmt(e.mdsKgMes, 1)} kg/mes`,
-        `${e.nExposiciones} sesiones${e.bloqueDesde ? ` desde ${fechaCorta(e.bloqueDesde)}` : ''}`, TIER[e.tier] ?? legible(e.tier),
-        CALIDAD[e.calidadTemporal] ?? legible(e.calidadTemporal),
+        `T ${signo(e.T)}${z(tramoDe(e.T, ESC_T))}`, `${signo(e.pendientePctSem)} %/sem${z(tramoDe(e.pendientePctSem, ESC_PEND))}`, `e1RM ${fmt(e.e1rmActual, 1)} kg`,
+        `mín. detectable ${fmt(e.mdsKgMes, 1)} kg/mes (≈ ${fmt(e.mdsPctMes, 1)} %/mes)${z(tramoDe(e.mdsPctMes, ESC_MDS))}`,
+        `sesiones: ${textoSesiones(e)}`, `ruido con ${e.nErr} sesiones (${TIER[e.tier] ?? legible(e.tier)})${z(tramoDe(e.nErr, ESC_NERR))}`,
+        `${CALIDAD[e.calidadTemporal] ?? legible(e.calidadTemporal)}${Number.isFinite(e.spanSemanas) && e.spanSemanas > 0 ? ` (ventana ${fmt(e.spanSemanas, 0)} sem: ${tramoDe(e.spanSemanas, ESC_VENTANA)?.label ?? ''})` : ''} [${e.calidadTemporal}]`,
       ]
       if (e.estrato) p.push(estratoLegible(e.estrato))
       if (Number.isFinite(e.TLong)) p.push(`T26 ${signo(e.TLong)}`)
       if (e.rirDisponible > 0) p.push(`RIR en ${e.rirDisponible}`)
-      if (e.erratas > 0) p.push(`${e.erratas} errata(s)`)
-      if (e.ultimaFecha) p.push(`última ${fechaCorta(e.ultimaFecha)}`)
+      if (e.ultimaFecha) p.push(`última ${fechaCorta(e.ultimaFecha)} (hace ${e.diasDesdeUltima} días${e.diasDesdeUltima > MEAM_CONFIG.gap_segment_reset_days ? ': ABANDONADO, sigue contando con sus números de entonces' : ''})`)
+      if (e.interrupcionReciente) p.push('PARÓN RECIENTE: bloquea la evaluación del músculo')
       if (e.mejorMarca) p.push(`${e.sinMejoraEn6 ? `SIN RÉCORD EN ${MEAM_CONFIG.no_improvement_exposures}` : 'con récord'}; a batir ${marcaLegible(e.mejorMarca)} del ${fechaCorta(e.mejorMarca.fecha)} (mejor de ${e.mejorMarca.nPrevias})`)
+      if (e.erratasDetalle.length) p.push(`apartados: ${e.erratasDetalle.map((x) => `${fechaCorta(x.fecha)} ${marcaLegible({ pesoRegistrado: x.pesoRegistrado, tipoCarga: x.tipoCarga, topReps: x.topReps })} → e1RM ${fmt(x.e1rm, 0)}${x.esperado !== null ? ` (esperado ≈ ${fmt(x.esperado, 0)})` : ''}`).join('; ')}`)
       if (e.flags.length) p.push(`avisos: ${e.flags.map((f) => `${legible(f)} [${f}]`).join(', ')}`)
       L.push(`- ${e.nombre} (${e.cluster}/${e.role}): ${p.join(' · ')}`)
     }
+    for (const e of m.ejerciciosFuera) L.push(`- ${e.nombre} (sin evaluar): ${textoFuera(e)}`)
   }
+  for (const g of inf.musculosSinTarjeta) { L.push(''); L.push(`## ${g.nombre}: SIN TARJETA (ningún ejercicio llega a 3 sesiones con fuerza estimada)`); for (const e of g.ejercicios) L.push(`- ${e.nombre}: ${textoFuera(e)}`) }
   if (inf.nombresSinMapa.length) { L.push(''); L.push(`Sin músculo asignado: ${inf.nombresSinMapa.join(' · ')}`) }
   return L.join('\n')
 }
@@ -275,6 +301,7 @@ export default function MeamPage() {
           <p><b className="text-white">Qué mira:</b> para cada músculo, si tu fuerza estimada (a partir del peso y las repeticiones de tu mejor serie en cada ejercicio) sube, baja o se mantiene a lo largo de las últimas semanas (hasta 16). No mide el músculo en sí, mide lo que rindes.</p>
           <p><b className="text-white">Colores:</b> <span style={{ color: SEMAFORO.mejora.color }}>verde</span> mejorando · <span style={{ color: SEMAFORO.estable.color }}>gris</span> estable · <span style={{ color: SEMAFORO.baja.color }}>ámbar</span> bajando · <span style={{ color: SEMAFORO.regresion.color }}>rojo</span> bajada confirmada varias veces.</p>
           <p><b className="text-white">Fiabilidad:</b> cuánto puedes fiarte de ese color. Baja cuando vienes de un parón, cuando los ejercicios de un músculo se contradicen o cuando aún hay pocas sesiones. Se actualiza cada lunes con las sesiones ya apuntadas.</p>
+          <p><b className="text-white">Bloques:</b> cada ejercicio se evalúa dentro de su bloque actual. Un parón de más de {MEAM_CONFIG.gap_segment_reset_days} días o un cambio de nivel (otra máquina, kilos por lado…) abre un bloque nuevo y lo anterior deja de compararse: por eso un ejercicio con mucho historial puede salir con pocas sesiones. En «¿Por qué?» se ve cuántas sesiones tiene registradas, cuántas cuentan y por qué.</p>
           <p><b className="text-white">Para que afine:</b> repite el mismo ejercicio, en el mismo rango de repeticiones, y anota cuántas repeticiones te quedaban (RIR) en la serie más fuerte. Si haces una semana suave, márcala como descarga.</p>
         </div>
       )}
@@ -322,6 +349,18 @@ export default function MeamPage() {
           <TarjetaMusculo key={m.musculo} m={m} abierto={abierto === m.musculo} onToggle={() => setAbierto(abierto === m.musculo ? null : m.musculo)} />
         ))}
       </div>
+
+      {informe && !calculando && informe.musculosSinTarjeta.length > 0 && (
+        <div className="mx-4 mt-4 bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Sin tarjeta todavía</p>
+          <p className="text-xs text-zinc-400 mt-1">Músculos con ejercicios registrados pero sin ninguno que llegue a 3 sesiones con fuerza estimada.</p>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {informe.musculosSinTarjeta.map((g) => (
+              <li key={g.musculo} className="text-[11px] text-zinc-400"><span className="text-zinc-200 font-bold">{g.nombre}</span>: {g.ejercicios.map((e) => `${e.nombre} (${textoFuera(e).replace(/\.$/, '')})`).join('; ')}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {informe && informe.nombresSinMapa.length > 0 && (
         <div className="mx-4 mt-4 bg-zinc-900 border border-amber-500/30 rounded-2xl p-4">
@@ -397,6 +436,9 @@ function TarjetaMusculo({ m, abierto, onToggle }: { m: InformeMusculo; abierto: 
           {motivoBaja && (
             <p className="text-[11px] text-zinc-400 mt-1">{motivoBaja}</p>
           )}
+          {m.diasSinSesion > 14 && m.ultimaSesion && (
+            <p className="text-[11px] text-amber-400/90 mt-1">Última sesión de este músculo el {fechaCorta(m.ultimaSesion)} ({m.diasSinSesion} días antes del corte): el estado y sus números son los de entonces; no se actualizan hasta que vuelvas a entrenarlo.</p>
+          )}
           {estancados.length > 0 && (
             <p className="text-[11px] text-amber-400/90 mt-1">
               Sin récord en las últimas {MEAM_CONFIG.no_improvement_exposures} sesiones: {estancados.map((e) => e.mejorMarca ? `${e.nombre} (a batir: ${marcaLegible(e.mejorMarca)} del ${fechaCorta(e.mejorMarca.fecha)}, mejor de las ${e.mejorMarca.nPrevias} anteriores)` : e.nombre).join('; ')}
@@ -413,17 +455,38 @@ function TarjetaMusculo({ m, abierto, onToggle }: { m: InformeMusculo; abierto: 
 }
 
 // ---------------------------------------------------------------------------
-// «¿Por qué?» — números con su explicación en llano
+// «¿Por qué?» — números con su explicación en llano y una escala con tramos
 // ---------------------------------------------------------------------------
 
-function Metrica({ nombre, valor, explica }: { nombre: string; valor: React.ReactNode; explica: string }) {
+function Metrica({ nombre, valor, explica, zona, escala }: { nombre: string; valor: React.ReactNode; explica: string; zona?: Tramo | null; escala?: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5 py-1.5 border-b border-zinc-800/60 last:border-b-0">
+    <div className="flex flex-col gap-0.5 py-2 border-b border-zinc-800/60 last:border-b-0">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-zinc-300 font-bold">{nombre}</span>
         <span className="text-zinc-100 tabular-nums font-bold shrink-0">{valor}</span>
       </div>
+      {zona && <span className="text-[11px] font-bold" style={{ color: zona.color }}>{zona.label}</span>}
+      {escala}
       <span className="text-[11px] text-zinc-400 leading-snug">{explica}</span>
+    </div>
+  )
+}
+
+/** Barra por tramos con el valor marcado: sitúa el número en una escala con etiquetas en llano; los cortes son los umbrales del motor. */
+function Escala({ valor, min, max, tramos, fmtCorte }: { valor: number; min: number; max: number; tramos: Tramo[]; fmtCorte?: (x: number) => string }) {
+  const f = fmtCorte ?? ((x: number) => String(x))
+  const pos = (x: number): string => `${(100 * (Math.min(max, Math.max(min, x)) - min)) / (max - min)}%`
+  // anchura de cada tramo dentro de [min, max]
+  const anchos = tramos.map((t, i) => Math.max(0, Math.min(max, t.hasta) - (i === 0 ? min : Math.min(max, Math.max(min, tramos[i - 1].hasta)))))
+  return (
+    <div className="mt-1 mb-0.5">
+      <div className="relative h-1.5 rounded-full overflow-visible flex">
+        {tramos.map((t, i) => <div key={i} className="h-full first:rounded-l-full last:rounded-r-full" style={{ width: `${(100 * anchos[i]) / (max - min)}%`, background: t.color, opacity: 0.5 }} />)}
+        {Number.isFinite(valor) && <span className="absolute top-1/2 size-3 rounded-full bg-white border-2 border-zinc-900 -translate-x-1/2 -translate-y-1/2" style={{ left: pos(valor) }} aria-hidden />}
+      </div>
+      <div className="relative h-3 text-[9px] text-zinc-500 tabular-nums">
+        {tramos.slice(0, -1).filter((t) => t.hasta > min && t.hasta < max).map((t, i) => <span key={i} className="absolute -translate-x-1/2" style={{ left: pos(t.hasta) }}>{f(t.hasta)}</span>)}
+      </div>
     </div>
   )
 }
@@ -431,18 +494,32 @@ function Metrica({ nombre, valor, explica }: { nombre: string; valor: React.Reac
 function Detalle({ m }: { m: InformeMusculo }) {
   const nSem = Math.round(m.fila.evidence.span_weeks)
   const ventana = Number.isFinite(nSem) && nSem > 0 ? `las últimas ${nSem} semanas` : 'la ventana analizada'
-  const tendenciaT = Math.abs(m.T) >= 1 ? 'destaca sobre el ruido' : Math.abs(m.T) >= 0.5 ? 'apunta a algo, pero aún se confunde con el ruido' : 'no se distingue del ruido'
-  const recienteD = !Number.isFinite(m.D) ? 'ahora mismo no hay sesiones recientes suficientes para calcularlo' : m.D <= -1 ? 'tus últimas sesiones están claramente por debajo de lo esperado' : m.D <= -0.5 ? 'tus últimas sesiones están algo por debajo de lo esperado' : m.D >= 0.5 ? 'tus últimas sesiones están por encima de lo esperado' : 'tus últimas sesiones están a la altura de lo esperado'
+  const mu = m.fila.evidence.muscle
+  const cambioPct: [number, number] | null = mu && Number.isFinite(mu.change_lower) ? [(Math.exp(mu.change_lower) - 1) * 100, (Math.exp(mu.change_upper) - 1) * 100] : null
+  const ancha = cambioPct && cambioPct[1] - cambioPct[0] > 10 ? ' (horquilla muy ancha: mucho ruido o pocas sesiones)' : ''
+  const zonaCambio: Tramo | null = m.cambioKg ? (m.cambioKg[0] > 0 ? { hasta: 0, label: `subida segura: hasta el peor caso de la horquilla es positivo${ancha}`, color: C.verde } : m.cambioKg[1] < 0 ? { hasta: 0, label: `bajada segura: hasta el mejor caso de la horquilla es negativo${ancha}`, color: C.rojo } : { hasta: 0, label: `la horquilla incluye el 0: no se puede afirmar cambio${ancha}`, color: C.gris }) : null
+  const zonaVol = Number.isFinite(m.volumenPercentil) ? tramoDe(m.volumenPercentil, ESC_VOL) : null
   return (
     <div className="px-4 pb-4 text-[11px] text-zinc-400 flex flex-col gap-3">
+      {m.motivoInconcluyente && (
+        <p className="text-[11px] text-zinc-200 bg-zinc-800/70 rounded-xl px-3 py-2 leading-snug"><b className="text-white">Por qué no se evalúa:</b> {m.motivoInconcluyente}</p>
+      )}
       <div>
         <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1">Los números</p>
-        <Metrica nombre="Tendencia (T)" valor={signo(m.T)} explica={`Cuántas veces la tendencia de ${ventana} supera al ruido de tus datos. Hace falta ±1 para entrar en «mejorando» o «bajando» y ±0.5 para mantenerse; ahora ${tendenciaT}.`} />
-        <Metrica nombre="Últimas sesiones (D)" valor={signo(m.D)} explica={`Compara tus últimas 3 sesiones con las 6 anteriores, descontando la tendencia. Por debajo de −1 es el primer requisito de la señal de cansancio (después hace falta que persista); ${recienteD}.`} />
-        <Metrica nombre="Ruido (σ)" valor={`${fmt(m.sigmaPct)} %`} explica="Cuánto varía tu rendimiento de un día a otro sin que cambie nada real (sueño, energía, cómo cuentas las repeticiones). Cuanto más bajo, antes se detectan los cambios." />
-        <Metrica nombre="Inercia del ruido (ρ)" valor={`${fmt(m.rho)}${m.rhoCalibrado ? '' : ' (por defecto)'}`} explica={m.rhoCalibrado ? 'Si un día flojo tiende a arrastrar al siguiente. Medido con tus datos.' : 'Si un día flojo tiende a arrastrar al siguiente. Aún no hay sesiones suficientes para medirlo con tus datos, así que se usa un valor prudente que hace el análisis más conservador.'} />
-        {m.cambioKg && <Metrica nombre={`Cambio en ${ventana}`} valor={`${signo(m.cambioKg[0], 1)} a ${signo(m.cambioKg[1], 1)} kg`} explica="Horquilla, con margen prudente, del cambio de tu fuerza estimada (1RM: lo máximo que podrías mover una vez) en este músculo a lo largo de la ventana." />}
-        <Metrica nombre="Volumen" valor={`${fmt(m.volumenSeriesSemana, 0)} series/sem${Number.isFinite(m.volumenPercentil) ? ` (P${fmt(m.volumenPercentil, 0)})` : ''}`} explica={Number.isFinite(m.volumenPercentil) ? `Media de las 3 últimas semanas con sesiones de este músculo. P${fmt(m.volumenPercentil, 0)}: por encima del ${fmt(m.volumenPercentil, 0)} % de tus semanas anteriores.${m.contextoAlto ? ' Cuenta como semanas de carga alta.' : ''}` : 'Media de las 3 últimas semanas con sesiones de este músculo.'} />
+        <Metrica nombre="Tendencia (T)" valor={signo(m.T)} zona={tramoDe(m.T, ESC_T)} escala={<Escala valor={m.T} min={-3} max={3} tramos={ESC_T} />}
+          explica={`Cuántas veces la tendencia de ${ventana} supera al ruido de tus datos. Umbrales del motor: ±0.5 para mantenerse en «mejorando»/«bajando» y ±1 para entrar; por encima de 3 ya no cambia nada.`} />
+        <Metrica nombre="Últimas sesiones (D)" valor={signo(m.D)} zona={Number.isFinite(m.D) ? tramoDe(m.D, ESC_D) : { hasta: 0, label: 'no calculable ahora: faltan sesiones recientes o de base en el mismo rango de reps', color: C.gris }} escala={<Escala valor={m.D} min={-3} max={3} tramos={ESC_D} />}
+          explica="Compara tus últimas 3 sesiones con las 6 anteriores, descontando la tendencia y en unidades de ruido. Por debajo de −1 es el primer requisito de la señal de cansancio (después hace falta que persista y que lo apoyen otro ejercicio o una carga alta)." />
+        <Metrica nombre="Ruido (σ)" valor={`${fmt(m.sigmaPct)} %`} zona={tramoDe(m.sigmaPct, ESC_SIGMA)} escala={<Escala valor={m.sigmaPct} min={0} max={8} tramos={ESC_SIGMA} fmtCorte={(x) => `${x} %`} />}
+          explica="Cuánto varía tu fuerza estimada de un día a otro sin que cambie nada real (sueño, energía, cómo cuentas las repeticiones). Con pocas sesiones se mezcla con la media de tus ejercicios. Cuanto más bajo, antes se detectan los cambios." />
+        <Metrica nombre="Inercia del ruido (ρ)" valor={`${fmt(m.rho)}${m.rhoCalibrado ? '' : ' (por defecto)'}`} zona={m.rhoCalibrado ? tramoDe(m.rho, ESC_RHO) : null} escala={m.rhoCalibrado ? <Escala valor={m.rho} min={0} max={0.6} tramos={ESC_RHO} /> : undefined}
+          explica={m.rhoCalibrado ? 'Si un día flojo tiende a arrastrar al siguiente (0 = nada, 0.6 = tope). Medido con tus datos.' : 'Si un día flojo tiende a arrastrar al siguiente (0 = nada, 0.6 = tope). Aún no se puede medir con tus datos (hacen falta 3 ejercicios con 20 sesiones normales en 16 semanas), así que se usa 0.3, un valor prudente que hace el análisis más conservador y veta la fiabilidad «alta».'} />
+        {m.cambioKg && <Metrica nombre={`Cambio en ${ventana}`} valor={`${signo(m.cambioKg[0], 1)} a ${signo(m.cambioKg[1], 1)} kg`} zona={zonaCambio}
+          explica={`Horquilla, con margen prudente, del cambio de tu fuerza estimada (1RM) en este músculo a lo largo de la ventana${cambioPct ? ` (${signo(cambioPct[0], 1)} % a ${signo(cambioPct[1], 1)} %)` : ''}. Se lee por sus extremos: si los dos tienen el mismo signo, el cambio es seguro.`} />}
+        <Metrica nombre="Volumen" valor={`${fmt(m.volumenSeriesSemana, 0)} series/sem${Number.isFinite(m.volumenPercentil) ? ` (P${fmt(m.volumenPercentil, 0)})` : ''}`} zona={zonaVol}
+          escala={Number.isFinite(m.volumenPercentil) ? <Escala valor={m.volumenPercentil} min={0} max={100} tramos={ESC_VOL} fmtCorte={(x) => `P${x}`} /> : undefined}
+          explica={Number.isFinite(m.volumenPercentil) ? `Media de las 3 últimas semanas con sesiones de este músculo, comparada contigo mismo: P${fmt(m.volumenPercentil, 0)} = por encima del ${fmt(m.volumenPercentil, 0)} % de tus semanas anteriores. Por debajo de P40 cuenta como poco volumen para ti; desde P70, como carga alta.${m.contextoAlto ? ' Ahora cuenta como carga alta.' : ''}` : 'Media de las 3 últimas semanas con sesiones de este músculo. Con menos de 4 semanas de histórico no se puede comparar contigo mismo.'} />
+        <Metrica nombre="Frecuencia" valor={`${fmt(m.frecuenciaSemanal, 1)} sesiones/sem`} explica="Sesiones distintas con este músculo por semana, media de las 3 últimas semanas completas." />
         {(m.etiqueta || m.etiquetaRecuperacion || m.flags.length > 0) && (
           <div className="pt-1.5 text-[11px] text-zinc-400 flex flex-col gap-0.5">
             {m.etiqueta && <span>Etiqueta del motor: {legible(m.etiqueta)}</span>}
@@ -456,33 +533,85 @@ function Detalle({ m }: { m: InformeMusculo }) {
         <ul className="divide-y divide-zinc-800/60">
           {m.ejercicios.map((e) => <FilaEjercicio key={e.key} e={e} />)}
         </ul>
-        <p className="text-[11px] text-zinc-500 mt-2">Las sesiones cuentan desde el bloque actual: un parón de más de 6 semanas o un cambio de máquina o de forma de apuntar los kilos abre un bloque nuevo, y el histórico anterior deja de compararse. «Mínimo detectable»: cambios más pequeños que ese valor se pierden dentro del ruido de ese ejercicio. Para afinar: mismo rango de repeticiones, anota el RIR de la serie fuerte y no cambies de variante.</p>
+        {m.ejerciciosFuera.length > 0 && (
+          <div className="mt-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1">Sin evaluar en este corte</p>
+            <ul className="flex flex-col gap-1">
+              {m.ejerciciosFuera.map((e) => <li key={e.nombre} className="text-[11px] text-zinc-400"><span className="text-zinc-200 font-bold">{e.nombre}</span>: {textoFuera(e)}</li>)}
+            </ul>
+          </div>
+        )}
+        <p className="text-[11px] text-zinc-500 mt-2">Cómo se cuenta: un ejercicio se evalúa dentro de su <b>bloque actual</b>; un parón de más de {MEAM_CONFIG.gap_segment_reset_days} días o un cambio de nivel (tres sesiones seguidas muy por encima o por debajo: otra máquina, kilos por lado…) abre un bloque nuevo y lo anterior deja de compararse. Dentro del bloque solo cuentan las sesiones con fuerza estimada (hasta {MEAM_CONFIG.e1rm_reps_max} reps en el top set, {MEAM_CONFIG.e1rm_reps_max_isolation} en aislamiento) y las de esta semana entran el lunes. La tendencia necesita {MEAM_CONFIG.N_state_min} sesiones normales repartidas en al menos {MEAM_CONFIG.state_span_min_weeks} semanas (mira hasta {MEAM_CONFIG.state_span_max_weeks}); el ruido se mide con los errores de pronóstico de esas sesiones ({MEAM_CONFIG.tier_established} = establecido, {MEAM_CONFIG.tier_mature} = maduro).</p>
       </div>
     </div>
   )
 }
 
+/** Por qué un ejercicio con registros no entra en el motor en este corte (menos de 3 sesiones con fuerza estimada en su bloque actual). */
+function textoFuera(e: EjercicioFuera): string {
+  const p: string[] = []
+  if (e.nExposicionesTotal === 0) {
+    p.push(`${e.nRegistros} sesiones registradas y ninguna con fuerza estimada`)
+    if (e.nSinE1rmPorReps > 0) p.push(`${e.nSinE1rmPorReps} pasan del máximo de reps`)
+    if (e.nSinE1rmPorCarga > 0) p.push(`${e.nSinE1rmPorCarga} sin kilos, sin reps o sin peso corporal apuntado`)
+    return `${p.join('; ')}.`
+  }
+  p.push(`${e.nBloque} sesión${e.nBloque === 1 ? '' : 'es'} en el bloque actual (hacen falta 3)`)
+  if (e.bloqueMotivo === 'paron') p.push(`bloque abierto el ${fechaCorta(e.bloqueDesde)} tras un parón de ${e.bloqueParonDias} días`)
+  else if (e.bloqueMotivo === 'protocolo') p.push(`bloque abierto el ${fechaCorta(e.bloqueDesde)} por un cambio de nivel`)
+  p.push(`${e.nExposicionesTotal} con fuerza estimada en total, ${e.nRegistros} registradas`)
+  if (e.nEstaSemana > 0) p.push(`${e.nEstaSemana} de esta semana cuentan el lunes`)
+  if (e.ultimaFecha) p.push(`última el ${fechaCorta(e.ultimaFecha)}`)
+  return `${p.join(' · ')}.`
+}
+
+/** Cuenta de sesiones de un ejercicio en llano: las que cuentan, por qué empieza ahí el bloque y las que no cuentan (y por qué). */
+function textoSesiones(e: InformeEjercicio): string {
+  const descargas = e.nExposiciones - e.nNormales
+  const bloque = e.bloqueMotivo === 'paron' ? ` (bloque abierto tras un parón de ${e.bloqueParonDias} días; lo anterior ya no se compara)` : e.bloqueMotivo === 'protocolo' ? ' (bloque abierto por un cambio de nivel: otra máquina o forma de apuntar los kilos)' : ''
+  const zonaB = tramoDe(e.nExposiciones, ESC_NBLOQUE)
+  const partes = [`${e.nExposiciones} en el bloque actual${zonaB ? ` [${zonaB.label}]` : ''}${e.bloqueDesde ? ` desde el ${fechaCorta(e.bloqueDesde)}` : ''}${bloque}${descargas > 0 ? `, ${descargas} de ellas descarga (no cuentan para ruido ni tendencia)` : ''}`]
+  if (e.nBloques > 1) partes.push(`${e.nExposicionesTotal} con fuerza estimada en todo el histórico (${e.nBloques} bloques)`)
+  const sin: string[] = []
+  if (e.nSinE1rmPorReps > 0) sin.push(`${e.nSinE1rmPorReps} por pasar de ${e.repsMax} reps`)
+  if (e.nSinE1rmPorCarga > 0) sin.push(`${e.nSinE1rmPorCarga} sin kilos, sin reps o sin peso corporal apuntado`)
+  partes.push(`${e.nRegistros} registradas${sin.length ? `, sin fuerza estimada ${sin.join(' y ')}` : ''}`)
+  if (e.nEstaSemana > 0) partes.push(`${e.nEstaSemana} de esta semana cuentan el lunes`)
+  return partes.join(' · ')
+}
+
 function FilaEjercicio({ e }: { e: InformeEjercicio }) {
+  const navigate = useNavigate()
   // el icono va por T (¿destaca sobre el ruido?), no por la pendiente: una pendiente grande con T bajo sigue siendo dudosa
   const dir = e.T >= 1 ? SEMAFORO.mejora : e.T <= -1 ? SEMAFORO.baja : SEMAFORO.estable
-  const claro = !Number.isFinite(e.T) ? 'sin tendencia' : Math.abs(e.T) >= 1 ? 'claro' : 'no concluyente'
+  const zonaT = tramoDe(e.T, ESC_T), zonaP = tramoDe(e.pendientePctSem, ESC_PEND), zonaM = tramoDe(e.mdsPctMes, ESC_MDS), zonaN = tramoDe(e.nErr, ESC_NERR)
+  const abandonado = e.diasDesdeUltima > MEAM_CONFIG.gap_segment_reset_days
   return (
-    <li className="py-1.5 flex flex-col gap-0.5">
+    <li className="py-2 flex flex-col gap-1">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-zinc-200 font-bold truncate">{e.nombre}</span>
+        <span className="text-zinc-200 font-bold truncate">{e.nombre}{e.role !== 'DIRECT' ? <span className="font-normal text-zinc-500"> · apoyo (no decide el estado)</span> : null}</span>
         <span className="inline-flex items-center gap-1 tabular-nums shrink-0" style={{ color: dir.color }}>{dir.icono}{signo(e.pendientePctSem)} %/sem</span>
       </div>
-      <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-zinc-400 tabular-nums">
-        <span>T {signo(e.T)} ({claro})</span>
-        <span>fuerza estimada {fmt(e.e1rmActual, 1)} kg</span>
-        <span>mínimo detectable {fmt(e.mdsKgMes, 1)} kg/mes</span>
-        <span>{e.nExposiciones} sesiones{e.bloqueDesde ? ` desde el ${fechaCorta(e.bloqueDesde)}` : ''} · {TIER[e.tier] ?? legible(e.tier)}</span>
-        <span>{CALIDAD[e.calidadTemporal] ?? legible(e.calidadTemporal)}</span>
-        {e.estrato && <span>{estratoLegible(e.estrato)}</span>}
-        {Number.isFinite(e.TLong) && <span>26 semanas: T {signo(e.TLong)}</span>}
-        {e.rirDisponible > 0 && <span>RIR anotado en {e.rirDisponible}</span>}
-        {e.erratas > 0 && <span className="text-amber-400/80">{e.erratas} dato(s) raro(s) apartado(s)</span>}
-        {e.flags.length > 0 && <span>{e.flags.map(legible).join(', ')}</span>}
+      {abandonado && (
+        <p className="text-[11px] text-amber-400/90">Sin sesiones desde el {fechaCorta(e.ultimaFecha)} ({e.diasDesdeUltima} días). Ojo: sigue contando en el músculo con sus números de entonces hasta que lo retomes (y al retomarlo abrirá un bloque nuevo).</p>
+      )}
+      <div className="flex flex-col gap-0.5 text-[11px] text-zinc-400 tabular-nums">
+        <span>Pendiente {signo(e.pendientePctSem)} %/sem{zonaP ? <> · <b style={{ color: zonaP.color }}>{zonaP.label}</b></> : null} · T {signo(e.T)}{zonaT ? <> (<span style={{ color: zonaT.color }}>{zonaT.label}</span>)</> : <> (sin tendencia: hacen falta {MEAM_CONFIG.N_state_min} sesiones normales en ≥ {MEAM_CONFIG.state_span_min_weeks} semanas dentro del bloque)</>}{Number.isFinite(e.TLong) ? ` · a 26 semanas T ${signo(e.TLong)}` : ''}</span>
+        <span>Fuerza estimada {fmt(e.e1rmActual, 1)} kg · mínimo detectable {fmt(e.mdsKgMes, 1)} kg/mes{Number.isFinite(e.mdsPctMes) ? <> (≈ {fmt(e.mdsPctMes, 1)} %/mes{zonaM ? <>: <b style={{ color: zonaM.color }}>{zonaM.label}</b></> : null})</> : null}</span>
+        <span>Sesiones: {textoSesiones(e)}</span>
+        <span>Ruido medido con {e.nErr} sesiones{zonaN ? <>: <b style={{ color: zonaN.color }}>{zonaN.label}</b></> : null} ({MEAM_CONFIG.tier_established} = establecido, {MEAM_CONFIG.tier_mature} = maduro) · {CALIDAD[e.calidadTemporal] ?? legible(e.calidadTemporal)}{Number.isFinite(e.spanSemanas) && e.spanSemanas > 0 ? ` (ventana de ${fmt(e.spanSemanas, 0)} semanas: ${tramoDe(e.spanSemanas, ESC_VENTANA)?.label ?? ''})` : ''}{e.estrato ? ` · ${estratoLegible(e.estrato)}` : ''}{e.rirDisponible > 0 ? ` · RIR anotado en ${e.rirDisponible}` : ''}</span>
+        {e.erratasDetalle.length > 0 && (
+          <div className="text-amber-400/90 flex flex-col gap-0.5">
+            <span>{e.erratasDetalle.length} dato{e.erratasDetalle.length === 1 ? '' : 's'} apartado{e.erratasDetalle.length === 1 ? '' : 's'} por salirse más de un {Math.round((Math.exp(MEAM_CONFIG.errata_log_dev) - 1) * 100)} % de lo esperado (si es un error de apunte, corrígelo en el historial; si es real y se repite 3 veces seguidas, se acepta como nuevo nivel):</span>
+            {e.erratasDetalle.map((x) => (
+              <span key={`${x.sesionId}|${x.fecha}`}>
+                <button onClick={() => navigate(`/historial?fecha=${x.fecha}&sesion=${encodeURIComponent(x.sesionId)}`)} className="underline underline-offset-2 font-bold text-amber-300 active:text-white">{fechaCorta(x.fecha)}</button>
+                {' '}· {marcaLegible({ pesoRegistrado: x.pesoRegistrado, tipoCarga: x.tipoCarga, topReps: x.topReps })} → fuerza est. {fmt(x.e1rm, 0)} kg{x.esperado !== null ? `, esperada ≈ ${fmt(x.esperado, 0)} kg` : ''}
+              </span>
+            ))}
+          </div>
+        )}
+        {e.flags.length > 0 && <span>Avisos: {e.flags.map(legible).join(', ')}</span>}
       </div>
     </li>
   )

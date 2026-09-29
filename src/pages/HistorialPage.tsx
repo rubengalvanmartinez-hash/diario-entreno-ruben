@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
@@ -56,6 +56,8 @@ export default function HistorialPage() {
   const [offset, setOffset] = useState(0)
   const [diaSel, setDiaSel] = useState<string | null>(null)
   const [sesionSel, setSesionSel] = useState<Sesion | null>(null)
+  // enlace profundo desde MEAM (?fecha=YYYY-MM-DD&sesion=<id>): abre ese día y esa sesión una sola vez, cuando el historial ya está cargado
+  const [params] = useSearchParams()
 
   const hoyIso = isoLocal(new Date())
 
@@ -69,6 +71,20 @@ export default function HistorialPage() {
     }
     return map
   }, [historialCrudo])
+
+  // Se aplica ajustando el estado durante el render (patrón de React para estado derivado), no en un efecto
+  const fechaEnlace = params.get('fecha'); const sesionEnlace = params.get('sesion')
+  const claveEnlace = fechaEnlace && /^\d{4}-\d{2}-\d{2}$/.test(fechaEnlace) ? `${fechaEnlace}|${sesionEnlace ?? ''}` : ''
+  const [enlaceAplicado, setEnlaceAplicado] = useState('')
+  const sesionesEnlace = fechaEnlace ? (porFecha.get(fechaEnlace) ?? []) : []
+  if (claveEnlace && claveEnlace !== enlaceAplicado && sesionesEnlace.length > 0) {
+    setEnlaceAplicado(claveEnlace)
+    const [y, m, d] = (fechaEnlace as string).split('-').map(Number)
+    const semanasAtras = Math.round((lunesDe(new Date()).getTime() - lunesDe(new Date(y, m - 1, d)).getTime()) / (7 * 86400000))
+    setOffset(Math.max(0, Math.floor(semanasAtras / SEMANAS_VISIBLES)))
+    setDiaSel(fechaEnlace)
+    setSesionSel(sesionesEnlace.find((s) => s.id === sesionEnlace) ?? (sesionesEnlace.length === 1 ? sesionesEnlace[0] : null))
+  }
 
   // Semanas a mostrar (de la más antigua a la más reciente)
   const semanas = useMemo(() => {
