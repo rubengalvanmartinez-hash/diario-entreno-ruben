@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { calcularInforme, type MeamWorkerRequest, type MeamWorkerResponse } from '../meam/compute'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertTriangle, BatteryLow, Lightbulb, Scale, Copy, Check } from 'lucide-react'
+import { ChevronLeft, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertTriangle, BatteryLow, Lightbulb, Scale, Copy, Check, ListChecks } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
 import { useHistorialRef } from '../hooks/useHistorialRef'
@@ -16,7 +16,8 @@ import type { GrupoId } from '../utils/gruposMusculares'
 import { ICONO_GRUPO, COLOR_GRUPO } from '../components/gruposUI'
 import type { VariantOverride, MeamMuscle } from '../meam/variants'
 import type { InformeMeam, InformeMusculo, InformeEjercicio, EjercicioFuera, Confianza } from '../meam/run'
-import { cargarVariantesRevisadas, guardarSnapshots } from '../meam/services'
+import { cargarVariantesRevisadas, guardarSnapshots, guardarVarianteRevisada } from '../meam/services'
+import { isoAddDays, diasEntre } from '../meam/exposure'
 import { MEAM_CONFIG } from '../meam/config'
 
 // ---------------------------------------------------------------------------
@@ -129,7 +130,8 @@ const fechaCorta = (iso: string): string => { const [y, m, d] = iso.split('-'); 
 function informeTexto(inf: InformeMeam): string {
   const L: string[] = []
   const fase = inf.faseNutricional !== 'desconocida' ? ` · ${FASE[inf.faseNutricional]} (${signo(inf.pesoPendientePctSem)} %/sem)` : ''
-  L.push(`MEAM ${inf.configVersion} · semana del ${fechaCorta(inf.corte)} · hoy ${fechaCorta(inf.hoy)}${fase}`)
+  L.push(`MEAM ${inf.configVersion} · semana del ${fechaCorta(inf.corte)} · hoy ${fechaCorta(inf.hoy)}${fase} · sesiones desde ${fechaCorta(inf.epoch)}`)
+  if (inf.revisados.length) L.push(`Revisados: ${inf.revisados.map((r) => `${r.nombre} → ${r.retirado ? 'retirado' : `heredado por ${r.sucesorNombre}`}`).join(' · ')}`)
   for (const m of inf.musculos) {
     const nSem = Math.round(m.fila.evidence.span_weeks)
     const rec = RECUP[m.recuperacion]
@@ -157,6 +159,7 @@ function informeTexto(inf: InformeMeam): string {
       if (e.rirDisponible > 0) p.push(`RIR en ${e.rirDisponible}`)
       if (e.ultimaFecha) p.push(`última ${fechaCorta(e.ultimaFecha)} (hace ${e.diasDesdeUltima} días${e.diasDesdeUltima > MEAM_CONFIG.gap_segment_reset_days ? ': ABANDONADO, sigue contando con sus números de entonces' : ''})`)
       if (e.interrupcionReciente) p.push('PARÓN RECIENTE: bloquea la evaluación del músculo')
+      if (e.heredaDe.length) p.push(`hereda ${e.heredaDe.join(', ')}`)
       if (e.mejorMarca) p.push(`${e.sinMejoraEn6 ? `SIN RÉCORD EN ${MEAM_CONFIG.no_improvement_exposures}` : 'con récord'}; a batir ${marcaLegible(e.mejorMarca)} del ${fechaCorta(e.mejorMarca.fecha)} (mejor de ${e.mejorMarca.nPrevias})`)
       if (e.erratasDetalle.length) p.push(`apartados: ${e.erratasDetalle.map((x) => `${fechaCorta(x.fecha)} ${marcaLegible({ pesoRegistrado: x.pesoRegistrado, tipoCarga: x.tipoCarga, topReps: x.topReps })} → e1RM ${fmt(x.e1rm, 0)}${x.esperado !== null ? ` (esperado ≈ ${fmt(x.esperado, 0)})` : ''}`).join('; ')}`)
       if (e.flags.length) p.push(`avisos: ${e.flags.map((f) => `${legible(f)} [${f}]`).join(', ')}`)
@@ -181,6 +184,136 @@ async function copiarTexto(texto: string): Promise<boolean> {
 }
 
 // ---------------------------------------------------------------------------
+// Periodos: «Analizar desde» (qué sesiones entran al motor) y «Resumen del periodo» (descriptivo, sobre lo ya calculado)
+// ---------------------------------------------------------------------------
+
+type Desde = '3m' | '6m' | '1a' | 'todo'
+type Periodo = '1m' | '3m' | '6m' | '1a' | 'todo'
+const DIAS: Record<Exclude<Periodo, 'todo'>, number> = { '1m': 30, '3m': 91, '6m': 182, '1a': 365 }
+const ETIQ: Record<Periodo, string> = { '1m': '1 mes', '3m': '3 meses', '6m': '6 meses', '1a': '1 año', todo: 'todo' }
+const inicioDe = (p: Periodo | Desde, hoy: string): string => (p === 'todo' ? '' : isoAddDays(hoy, -DIAS[p]))
+function leerPref<T extends string>(clave: string, validos: readonly T[], porDefecto: T): T {
+  try { const v = localStorage.getItem(clave); return v && (validos as readonly string[]).includes(v) ? (v as T) : porDefecto } catch { return porDefecto }
+}
+function guardarPref(clave: string, v: string): void { try { localStorage.setItem(clave, v) } catch { /* sin almacenamiento */ } }
+
+function Chips<T extends string>({ opciones, valor, onChange, etiqueta }: { opciones: readonly T[]; valor: T; onChange: (v: T) => void; etiqueta: string }) {
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-[11px] text-zinc-500 mr-0.5">{etiqueta}</span>
+      {opciones.map((o) => (
+        <button key={o} onClick={() => onChange(o)} className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${valor === o ? 'bg-white text-zinc-900' : 'bg-zinc-800 text-zinc-300 active:bg-zinc-700'}`}>{ETIQ[o as Periodo]}</button>
+      ))}
+    </div>
+  )
+}
+
+/** Resumen descriptivo del periodo con lo ya calculado: semáforo semana a semana, fuerza estimada primera→última y mejor marca por ejercicio, volumen. No es el motor. */
+function ResumenPeriodo({ m, periodo, epoch, hoy }: { m: InformeMusculo; periodo: Periodo; epoch: string; hoy: string }) {
+  const inicio = inicioDe(periodo, hoy)
+  const filas = m.historial.filter((r) => isoAddDays(epoch, r.week * 7) >= inicio)
+  const cuenta: Record<Semaforo, number> = { mejora: 0, estable: 0, baja: 0, regresion: 0, sin_datos: 0 }
+  for (const r of filas) cuenta[semaforoDe({ estado: r.adaptation } as InformeMusculo)]++
+  const semanasVol = m.volumenSemanal.filter((s) => s.lunes >= inicio && s.series > 0)
+  const volMedio = semanasVol.length ? semanasVol.reduce((a, s) => a + s.series, 0) / semanasVol.length : NaN
+  const ruido = Number.isFinite(m.sigmaPct) ? m.sigmaPct : NaN
+  return (
+    <div>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1">Resumen del periodo ({ETIQ[periodo]})</p>
+      {filas.length === 0 ? <p className="text-[11px] text-zinc-500">Sin cortes semanales en este periodo.</p> : (
+        <>
+          <div className="flex flex-wrap gap-0.5 mb-1" aria-label="Estado semana a semana">
+            {filas.map((r) => { const s = SEMAFORO[semaforoDe({ estado: r.adaptation } as InformeMusculo)]; const fecha = isoAddDays(epoch, r.week * 7); return <span key={r.week} title={`${fechaCorta(fecha)}: ${s.label}${r.recovery !== 'NORMAL' ? ` · ${legible(r.recovery)}` : ''}`} className="size-3 rounded-sm" style={{ background: s.color, opacity: 0.85, outline: r.recovery === 'FATIGA_SOSPECHADA' || r.recovery === 'NO_ATRIBUIDA' ? `2px solid ${RECUP[r.recovery]?.color ?? C.rojo}` : undefined, outlineOffset: -1 }} /> })}
+          </div>
+          <p className="text-[11px] text-zinc-400">{filas.length} semanas: {(['mejora', 'estable', 'baja', 'regresion', 'sin_datos'] as Semaforo[]).filter((k) => cuenta[k] > 0).map((k) => `${cuenta[k]} ${SEMAFORO[k].label.toLowerCase()}`).join(' · ')}{Number.isFinite(volMedio) ? ` · volumen ${fmt(volMedio, 0)} series/sem en ${semanasVol.length} semanas con sesión` : ''}</p>
+        </>
+      )}
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {m.ejercicios.map((e) => {
+          const pts = e.serie.filter((x) => x.fecha >= inicio && x.tipo === 'normal')
+          if (pts.length < 2) return <li key={e.key} className="text-[11px] text-zinc-500"><span className="text-zinc-300 font-bold">{e.nombre}</span>: {pts.length} sesión{pts.length === 1 ? '' : 'es'} normal{pts.length === 1 ? '' : 'es'} en el periodo.</li>
+          const a = pts[0], b = pts[pts.length - 1]
+          let mejor = pts[0]; for (const x of pts) if (x.e1rm > mejor.e1rm) mejor = x
+          const dPct = (b.e1rm / a.e1rm - 1) * 100
+          const veredicto = Number.isFinite(ruido) && Math.abs(dPct) < 2 * ruido ? 'dentro del ruido' : dPct > 0 ? 'por encima del ruido' : 'por debajo del ruido'
+          return (
+            <li key={e.key} className="text-[11px] text-zinc-400">
+              <span className="text-zinc-300 font-bold">{e.nombre}</span>{e.heredaDe.length ? <span className="text-zinc-500"> (incluye {e.heredaDe.join(', ')})</span> : null}: {pts.length} sesiones · fuerza estimada {fmt(a.e1rm, 1)} → {fmt(b.e1rm, 1)} kg ({signo(dPct, 1)} %, {veredicto}) · mejor {fmt(mejor.e1rm, 1)} kg el {fechaCorta(mejor.fecha)}
+            </li>
+          )
+        })}
+      </ul>
+      <p className="text-[11px] text-zinc-500 mt-1.5">Descriptivo: compara la primera y la última sesión normal del periodo y la mejor marca; el estado del motor sale solo de las últimas 16 semanas. Con ruido σ = {fmt(ruido, 1)} %, una diferencia menor de {fmt(2 * ruido, 1)} % no es distinguible del azar.</p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Revisión de ejercicios sin uso: retirar, heredar («sucesor de») o seguir usándolo. Manual: la app solo propone.
+// ---------------------------------------------------------------------------
+
+const DIAS_SIN_USO = 7 * MEAM_CONFIG.state_span_max_weeks
+
+type Candidato = InformeMeam['variantes'][number] & { sugerido: InformeMeam['variantes'][number] | null; activos: InformeMeam['variantes'][number][] }
+
+function candidatosRevision(inf: InformeMeam, overrides: readonly VariantOverride[], hoy: string): Candidato[] {
+  const ov = new Map(overrides.map((o) => [o.ejercicio, o]))
+  const activos = inf.variantes.filter((v) => diasEntre(v.ultimaFecha, hoy) <= DIAS_SIN_USO)
+  return inf.variantes
+    .filter((v) => v.meta.musculo !== 'otros' && diasEntre(v.ultimaFecha, hoy) > DIAS_SIN_USO)
+    .filter((v) => { const r = ov.get(v.key)?.revisado_en; return !(r && diasEntre(r, hoy) <= DIAS_SIN_USO) })
+    .map((v) => {
+      const mismos = activos.filter((w) => w.meta.musculo === v.meta.musculo && w.key !== v.key)
+      // sugerencia: empezó entre 1 semana antes y 4 después de la última sesión del viejo (relevo sin solaparse)
+      const sug = mismos.filter((w) => w.primeraFecha >= isoAddDays(v.ultimaFecha, -7) && w.primeraFecha <= isoAddDays(v.ultimaFecha, 28)).sort((a, b) => a.primeraFecha.localeCompare(b.primeraFecha))[0] ?? null
+      return { ...v, sugerido: sug, activos: mismos }
+    })
+    .sort((a, b) => b.nRegistros - a.nRegistros)
+}
+
+function RevisionEjercicios({ candidatos, hoy, onGuardar }: { candidatos: Candidato[]; hoy: string; onGuardar: (o: VariantOverride) => Promise<boolean> }) {
+  const [i, setI] = useState(0)
+  const [otro, setOtro] = useState('')
+  const [aviso, setAviso] = useState('')
+  const c = candidatos[Math.min(i, candidatos.length - 1)]
+  if (!c) return <p className="text-xs text-zinc-400">No queda nada por revisar.</p>
+  const base = (extra: Partial<VariantOverride>): VariantOverride => ({
+    ejercicio: c.key, musculo: c.meta.musculo, cluster: c.meta.cluster, role: c.meta.role, equipment: c.meta.equipment, es_asistencia: c.meta.esAsistencia, aislamiento: c.meta.aislamiento,
+    retirado: false, sucesor: null, revisado_en: hoy, ...extra,
+  })
+  const decidir = async (o: VariantOverride) => {
+    setAviso('')
+    const ok = await onGuardar(o)
+    if (!ok) setAviso('Aplicado en esta sesión, pero no se ha podido guardar: falta ejecutar supabase_v2.8.2_meam.sql.')
+    setOtro('')
+  }
+  return (
+    <div className="flex flex-col gap-2 text-xs text-zinc-300">
+      <p className="text-[11px] text-zinc-500">{candidatos.length} ejercicio{candidatos.length === 1 ? '' : 's'} sin sesión en más de {MEAM_CONFIG.state_span_max_weeks} semanas. Mientras sigan activos cuentan en su músculo con los números de entonces.</p>
+      <p><b className="text-white">{c.nombre}</b> · última sesión {fechaCorta(c.ultimaFecha)} ({diasEntre(c.ultimaFecha, hoy)} días) · {c.nRegistros} sesiones desde {fechaCorta(c.primeraFecha)}</p>
+      {c.sugerido && <p className="text-zinc-400">Parece sustituido por <b className="text-zinc-200">{c.sugerido.nombre}</b> (mismo músculo, empezó el {fechaCorta(c.sugerido.primeraFecha)}).</p>}
+      <div className="flex flex-wrap gap-1.5">
+        {c.sugerido && <button onClick={() => decidir(base({ sucesor: c.sugerido!.key }))} className="rounded-full px-3 py-1.5 text-[11px] font-bold bg-green-500/15 text-green-300 active:bg-green-500/30">La hereda «{c.sugerido.nombre}»</button>}
+        <button onClick={() => decidir(base({ retirado: true }))} className="rounded-full px-3 py-1.5 text-[11px] font-bold bg-zinc-800 text-zinc-200 active:bg-zinc-700">Retirar sin heredero</button>
+        <button onClick={() => decidir(base({}))} className="rounded-full px-3 py-1.5 text-[11px] font-bold bg-zinc-800 text-zinc-200 active:bg-zinc-700">Sigo usándolo</button>
+        <button onClick={() => setI((k) => (k + 1) % candidatos.length)} className="rounded-full px-3 py-1.5 text-[11px] font-bold text-zinc-400 active:bg-zinc-800">Saltar</button>
+      </div>
+      {c.activos.length > 0 && (
+        <div className="flex items-center gap-2">
+          <select value={otro} onChange={(ev) => setOtro(ev.target.value)} className="flex-1 min-w-0 bg-zinc-800 text-zinc-200 text-[11px] rounded-lg px-2 py-1.5">
+            <option value="">Otro heredero…</option>
+            {c.activos.map((w) => <option key={w.key} value={w.key}>{w.nombre} (desde {fechaCorta(w.primeraFecha)})</option>)}
+          </select>
+          <button disabled={!otro} onClick={() => decidir(base({ sucesor: otro }))} className="rounded-full px-3 py-1.5 text-[11px] font-bold bg-zinc-800 text-zinc-200 disabled:opacity-40 active:bg-zinc-700">Heredar</button>
+        </div>
+      )}
+      <p className="text-[11px] text-zinc-500">Heredar: las dos pasan a ser un solo ejercicio para el motor, con bloque nuevo desde la primera sesión del heredero (no se mezclan kilos de máquinas distintas). Elige un heredero que empezara después de dejar el viejo: si se solapan en el tiempo, sus kilos se mezclarían en el mismo bloque. Retirar: sale del cálculo. Sigo usándolo: no vuelve a preguntar hasta dentro de {MEAM_CONFIG.state_span_max_weeks} semanas.</p>
+      {aviso && <p className="text-[11px] text-amber-400">{aviso}</p>}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Página
 // ---------------------------------------------------------------------------
 
@@ -196,6 +329,13 @@ export default function MeamPage() {
   const [ms, setMs] = useState<number | null>(null)
   const [ayuda, setAyuda] = useState(false)
   const [copiado, setCopiado] = useState<'ok' | 'error' | null>(null)
+  const [desde, setDesde] = useState<Desde>(() => leerPref('meam.desde', ['3m', '6m', '1a', 'todo'] as const, 'todo'))
+  const [periodo, setPeriodo] = useState<Periodo>(() => leerPref('meam.periodo', ['1m', '3m', '6m', '1a', 'todo'] as const, '3m'))
+  const [revisando, setRevisando] = useState(false)
+  const hoyIso = new Date().toISOString().slice(0, 10)
+  // «Analizar desde»: solo entran al motor las sesiones desde esa fecha (los nombres, para el mapa, salen de todo el historial)
+  const inicioAnalisis = inicioDe(desde, hoyIso)
+  const historialAnalizado = useMemo(() => (inicioAnalisis ? historial.filter((s) => s.fecha >= inicioAnalisis) : historial), [historial, inicioAnalisis])
   const guardadoRef = useRef<string>('')
   const workerRef = useRef<Worker | null>(null)
   const reqIdRef = useRef(0)
@@ -207,12 +347,13 @@ export default function MeamPage() {
   // Huella de CONTENIDO del historial (no de referencia): el pull cada 5 s crea arrays nuevos con los mismos datos (auditoría 6, C1)
   const huella = useMemo(() => {
     const partes: string[] = []
-    for (const s of historial) partes.push(`${s.id}|${s.fecha}|${s.tipoSesion ?? ''}|${s.gimnasio ?? ''}|${s.ejercicios.map((e) => `${e.nombreSustituido ?? e.nombreSnapshot}:${e.series.map((x) => `${x.reps}/${x.pesoKg}/${x.etiqueta ?? ''}`).join(',')}`).join(';')}`)
+    partes.push(`D:${inicioAnalisis}`)
+    for (const s of historialAnalizado) partes.push(`${s.id}|${s.fecha}|${s.tipoSesion ?? ''}|${s.gimnasio ?? ''}|${s.ejercicios.map((e) => `${e.nombreSustituido ?? e.nombreSnapshot}:${e.series.map((x) => `${x.reps}/${x.pesoKg}/${x.etiqueta ?? ''}`).join(',')}`).join(';')}`)
     partes.push(`P:${registrosPeso.map((p) => `${p.fecha}=${p.pesoKg}`).join(',')}`)
     partes.push(`E:${ejercicios.map((e) => `${e.nombre}${e.esAsistencia ? '*' : ''}`).join(',')}`)
     partes.push(`O:${JSON.stringify(overrides ?? [])}`)
     return partes.join('\n')
-  }, [historial, registrosPeso, ejercicios, overrides])
+  }, [historialAnalizado, inicioAnalisis, registrosPeso, ejercicios, overrides])
 
   useEffect(() => {
     if (overrides === null) return
@@ -222,7 +363,7 @@ export default function MeamPage() {
     for (const s of historial) for (const e of s.ejercicios) nombres.add(e.nombreSustituido ?? e.nombreSnapshot)
     for (const e of ejercicios) nombres.add(e.nombre)
     const asistencia = [...new Set(ejercicios.filter((e) => e.esAsistencia).map((e) => nombreCanonico(e.nombre)))]
-    const req: MeamWorkerRequest = { id: ++reqIdRef.current, sesiones: historial, pesos: registrosPeso, nombres: [...nombres], overrides, asistencia }
+    const req: MeamWorkerRequest = { id: ++reqIdRef.current, sesiones: historialAnalizado, pesos: registrosPeso, nombres: [...nombres], overrides, asistencia }
     ultimaReqRef.current = req
     setCalculando(true)
     const aplicar = (res: MeamWorkerResponse) => {
@@ -250,18 +391,26 @@ export default function MeamPage() {
     }
     // sin Worker (navegadores antiguos): cálculo en el hilo principal, diferido para no bloquear el primer render
     setTimeout(() => aplicar(calcularInforme(req)), 0)
-  }, [huella, historial, registrosPeso, ejercicios, overrides])
+  }, [huella, historial, historialAnalizado, registrosPeso, ejercicios, overrides])
 
   useEffect(() => () => { workerRef.current?.terminate(); workerRef.current = null }, [])
 
   // snapshots append-only: una vez por corte y sesión de la app (idempotente por input_hash)
   useEffect(() => {
-    if (!informe || informe.musculos.length === 0) return
+    if (!informe || informe.musculos.length === 0 || inicioAnalisis) return   // con «Analizar desde» acotado no se guardan snapshots (serían de otro análisis)
     const clave = `${informe.corte}|${informe.musculos.map((m) => m.inputHash).join(',')}`
     if (guardadoRef.current === clave) return
     guardadoRef.current = clave
     guardarSnapshots(informe).then((n) => { if (n > 0) console.log(`[MEAM] ${n} snapshots guardados (${informe.corte})`) })
-  }, [informe])
+  }, [informe, inicioAnalisis])
+
+  const candidatos = useMemo(() => (informe && overrides ? candidatosRevision(informe, overrides, hoyIso) : []), [informe, overrides, hoyIso])
+  const guardarRevision = async (o: VariantOverride): Promise<boolean> => {
+    const ok = await guardarVarianteRevisada(o)
+    // se aplica en la sesión aunque no se haya podido guardar (el recálculo sale de `overrides`)
+    setOverrides((prev) => [...(prev ?? []).filter((x) => x.ejercicio !== o.ejercicio), o])
+    return ok
+  }
 
   // resumen de cabecera: cuántos músculos en cada color + cuántos con señal de cansancio
   const resumen = useMemo(() => {
@@ -280,7 +429,7 @@ export default function MeamPage() {
         <div className="min-w-0 flex-1">
           <h1 className="text-lg font-black text-white tracking-tight leading-tight">Evidencia de adaptación</h1>
           <p className="text-[11px] text-zinc-500">
-            {calculando ? 'Calculando…' : informe ? `Semana del ${fechaCorta(informe.corte)} · con todas las sesiones anteriores` : 'Sin datos'}
+            {calculando ? 'Calculando…' : informe ? `Semana del ${fechaCorta(informe.corte)} · ${inicioAnalisis ? `sesiones desde el ${fechaCorta(inicioAnalisis)}` : 'con todas las sesiones anteriores'}` : 'Sin datos'}
           </p>
         </div>
         {informe && !calculando && informe.musculos.length > 0 && (
@@ -295,6 +444,32 @@ export default function MeamPage() {
           <HelpCircle size={20} />
         </button>
       </div>
+
+      <div className="mx-4 mb-3 flex flex-col gap-1.5">
+        <Chips etiqueta="Analizar desde" opciones={['3m', '6m', '1a', 'todo'] as const} valor={desde} onChange={(v) => { setDesde(v); guardarPref('meam.desde', v) }} />
+        <Chips etiqueta="Resumen del periodo" opciones={['1m', '3m', '6m', '1a', 'todo'] as const} valor={periodo} onChange={(v) => { setPeriodo(v); guardarPref('meam.periodo', v) }} />
+        {inicioAnalisis && historialAnalizado.length > 0 && diasEntre(historialAnalizado[0].fecha, hoyIso) < 7 * (MEAM_CONFIG.state_span_min_weeks + 1) && (
+          <p className="text-[11px] text-amber-400">Con menos de {MEAM_CONFIG.state_span_min_weeks + 1} semanas de sesiones el motor no puede evaluar nada: amplía el periodo.</p>
+        )}
+      </div>
+
+      {!calculando && informe && (candidatos.length > 0 || informe.revisados.length > 0) && (
+        <div className="mx-4 mb-3 bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+          <button onClick={() => setRevisando((v) => !v)} aria-expanded={revisando} className="w-full flex items-center gap-2 px-4 py-2.5 text-left active:bg-zinc-800">
+            <ListChecks size={16} className="text-amber-300 shrink-0" />
+            <span className="text-xs font-bold text-white flex-1">Revisar ejercicios{candidatos.length > 0 ? ` · ${candidatos.length} sin uso` : ''}</span>
+            {revisando ? <ChevronUp size={14} className="text-zinc-400" /> : <ChevronDown size={14} className="text-zinc-400" />}
+          </button>
+          {revisando && (
+            <div className="px-4 pb-3 flex flex-col gap-2">
+              <RevisionEjercicios candidatos={candidatos} hoy={hoyIso} onGuardar={guardarRevision} />
+              {informe.revisados.length > 0 && (
+                <p className="text-[11px] text-zinc-500">Ya revisados: {informe.revisados.map((r) => `${r.nombre} → ${r.retirado ? 'retirado' : `heredado por ${r.sucesorNombre}`}`).join(' · ')}. Para deshacer, edita la fila en meam_variants (pantalla de edición pendiente).</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {ayuda && (
         <div className="mx-4 mb-3 bg-zinc-900 border border-zinc-700 rounded-2xl p-4 text-xs text-zinc-300 leading-relaxed flex flex-col gap-2">
@@ -346,7 +521,7 @@ export default function MeamPage() {
 
       <div className="mx-4 flex flex-col gap-3">
         {!calculando && informe?.musculos.map((m) => (
-          <TarjetaMusculo key={m.musculo} m={m} abierto={abierto === m.musculo} onToggle={() => setAbierto(abierto === m.musculo ? null : m.musculo)} />
+          <TarjetaMusculo key={m.musculo} m={m} abierto={abierto === m.musculo} onToggle={() => setAbierto(abierto === m.musculo ? null : m.musculo)} periodo={periodo} epoch={informe.epoch} hoy={hoyIso} />
         ))}
       </div>
 
@@ -394,7 +569,7 @@ function Fiabilidad({ conf }: { conf: Confianza }) {
   )
 }
 
-function TarjetaMusculo({ m, abierto, onToggle }: { m: InformeMusculo; abierto: boolean; onToggle: () => void }) {
+function TarjetaMusculo({ m, abierto, onToggle, periodo, epoch, hoy }: { m: InformeMusculo; abierto: boolean; onToggle: () => void; periodo: Periodo; epoch: string; hoy: string }) {
   const sem = SEMAFORO[semaforoDe(m)]
   const rec = RECUP[m.recuperacion]
   const grupo = GRUPO_DE[m.musculo]
@@ -449,7 +624,7 @@ function TarjetaMusculo({ m, abierto, onToggle }: { m: InformeMusculo; abierto: 
       <button onClick={onToggle} aria-expanded={abierto} aria-label={`${abierto ? 'Ocultar' : 'Ver'} el detalle de ${m.nombre}`} className="w-full flex items-center justify-center gap-1 py-2 text-[11px] font-bold text-zinc-400 border-t border-zinc-800 active:bg-zinc-800">
         {abierto ? <ChevronUp size={14} /> : <ChevronDown size={14} />} ¿Por qué?
       </button>
-      {abierto && <Detalle m={m} />}
+      {abierto && <Detalle m={m} periodo={periodo} epoch={epoch} hoy={hoy} />}
     </div>
   )
 }
@@ -491,7 +666,7 @@ function Escala({ valor, min, max, tramos, fmtCorte }: { valor: number; min: num
   )
 }
 
-function Detalle({ m }: { m: InformeMusculo }) {
+function Detalle({ m, periodo, epoch, hoy }: { m: InformeMusculo; periodo: Periodo; epoch: string; hoy: string }) {
   const nSem = Math.round(m.fila.evidence.span_weeks)
   const ventana = Number.isFinite(nSem) && nSem > 0 ? `las últimas ${nSem} semanas` : 'la ventana analizada'
   const mu = m.fila.evidence.muscle
@@ -528,6 +703,7 @@ function Detalle({ m }: { m: InformeMusculo }) {
           </div>
         )}
       </div>
+      <ResumenPeriodo m={m} periodo={periodo} epoch={epoch} hoy={hoy} />
       <div>
         <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1">Por ejercicio</p>
         <ul className="divide-y divide-zinc-800/60">
@@ -589,7 +765,7 @@ function FilaEjercicio({ e }: { e: InformeEjercicio }) {
   return (
     <li className="py-2 flex flex-col gap-1">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-zinc-200 font-bold truncate">{e.nombre}{e.role !== 'DIRECT' ? <span className="font-normal text-zinc-500"> · apoyo (no decide el estado)</span> : null}</span>
+        <span className="text-zinc-200 font-bold truncate">{e.nombre}{e.heredaDe.length ? <span className="font-normal text-zinc-500"> · hereda {e.heredaDe.join(', ')}</span> : null}{e.role !== 'DIRECT' ? <span className="font-normal text-zinc-500"> · apoyo (no decide el estado)</span> : null}</span>
         <span className="inline-flex items-center gap-1 tabular-nums shrink-0" style={{ color: dir.color }}>{dir.icono}{signo(e.pendientePctSem)} %/sem</span>
       </div>
       {abandonado && (

@@ -268,5 +268,30 @@ check("'Bíceps' vía alias → clave canónica 'biceps con barra fija'", constr
     check('7d: asistido ⇒ carga efectiva 55 y peso registrado 25 kg de ayuda', dv.mejorMarca !== null && Math.abs(dv.mejorMarca.topLoad - 55) < 1e-9 && Math.abs(dv.mejorMarca.pesoRegistrado - 25) < 1e-9 && dv.mejorMarca.tipoCarga === 'ayuda')
   }
 }
+// revisión de ejercicios sin uso (2.8.2): sucesor hereda el historial con ruptura de protocolo; retirado sale del cálculo
+{
+  const ses: SesionConTipo[] = []
+  for (let i = 0; i < 8; i++) ses.push(sesion(`v${i}`, fechaN(i * 7), [{ nombre: 'Prensa', series: [serie(1, 8, 200), serie(2, 8, 200), serie(3, 8, 200)] }]))
+  for (let i = 8; i < 16; i++) ses.push(sesion(`n${i}`, fechaN(i * 7), [{ nombre: 'Prensa Technogym', series: [serie(1, 8, 140), serie(2, 8, 140), serie(3, 8, 140)] }]))
+  const base = { musculo: 'cuadriceps' as const, cluster: 'PRENSA', role: 'DIRECT' as const, equipment: 'isolation_machine' as const, es_asistencia: false, aislamiento: false }
+  const mapaH = construirMapaVariantes(['Prensa', 'Prensa Technogym'], [{ ejercicio: 'prensa', ...base, sucesor: 'prensa technogym' }])
+  const derH = derivarExposiciones(ses, mapaH)
+  const dvH = derH.variantes.get('prensa technogym')
+  check('sucesor: una sola variante con 16 exposiciones (el salto 200→140 no es errata)', !derH.variantes.has('prensa') && dvH !== undefined && dvH.exps.length === 16)
+  check('sucesor: ruptura de protocolo en la primera sesión propia del heredero', dvH !== undefined && dvH.rupturasPropuestas.length === 1 && dvH.rupturasPropuestas[0] === 8 && dvH.heredaDe.join() === 'Prensa')
+  const mapaR = construirMapaVariantes(['Prensa', 'Prensa Technogym'], [{ ejercicio: 'prensa', ...base, retirado: true }])
+  const derR = derivarExposiciones(ses, mapaR)
+  check('retirado: fuera del cálculo; el nuevo sigue solo con las suyas', !derR.variantes.has('prensa') && derR.variantes.get('prensa technogym')!.exps.length === 8)
+  // ciclo A→B→A: se anula la revisión y cada ejercicio queda como está
+  const mapaC = construirMapaVariantes(['Prensa', 'Prensa Technogym'], [{ ejercicio: 'prensa', ...base, sucesor: 'prensa technogym' }, { ejercicio: 'prensa technogym', ...base, sucesor: 'prensa' }])
+  const derC = derivarExposiciones(ses, mapaC)
+  check('ciclo de sucesores: se ignora (dos variantes con 8 exposiciones y sin herencia)', derC.variantes.get('prensa')?.exps.length === 8 && derC.variantes.get('prensa technogym')?.exps.length === 8 && derC.variantes.get('prensa technogym')?.heredaDe.length === 0)
+  // primera sesión propia del heredero sin e1RM (20 reps en compuesto): la referencia de erratas se reinicia igualmente
+  const ses2 = [...ses.slice(0, 8), sesion('n8', fechaN(56), [{ nombre: 'Prensa Technogym', series: [serie(1, 20, 100)] }]), ...ses.slice(9)]
+  const dv2 = derivarExposiciones(ses2, mapaH).variantes.get('prensa technogym')!
+  check('herencia con primera sesión propia sin e1RM: una sola ruptura y ninguna errata', dv2.rupturasPropuestas.length === 1 && dv2.erratas.length === 0 && dv2.exps.length === 15)
+  const informeH = ejecutarMeam(ses, mapaH, [], { hoy: fechaN(16 * 7) })
+  check('informe: el heredero declara heredaDe y no hay revisados pendientes', informeH.revisados.length === 1 && informeH.revisados[0].sucesorNombre === 'Prensa Technogym' && informeH.variantes.every((v) => v.key !== 'prensa'))
+}
 console.log(`${total} comprobaciones, ${fallos} fallos (con las correcciones de la auditoría 6)`)
 if (fallos > 0) process.exit(1)

@@ -24,6 +24,7 @@ export async function cargarVariantesRevisadas(): Promise<VariantOverride[]> {
         ejercicio: String(r.ejercicio ?? ''), musculo: musculo as MeamMuscle, cluster: String(r.cluster ?? 'OTROS'),
         role: (ROLES.has(role) ? role : 'DIRECT') as VariantRole, equipment: (EQUIPOS.has(equipment) ? equipment : 'compound_free') as EquipmentClass,
         es_asistencia: !!r.es_asistencia, aislamiento: !!r.aislamiento,
+        retirado: !!r.retirado, sucesor: r.sucesor ? String(r.sucesor) : null, revisado_en: r.revisado_en ? String(r.revisado_en).slice(0, 10) : null,
       }]
     })
   } catch (e) {
@@ -36,8 +37,17 @@ export async function guardarVarianteRevisada(o: VariantOverride): Promise<boole
   const id = getIdActivo()
   if (!id) return false
   try {
-    const { error } = await supabase.from('meam_variants').upsert({ usuario_id: id, ...o, updated_at: new Date().toISOString() }, { onConflict: 'usuario_id,ejercicio' })
-    if (error) throw error
+    const fila = { usuario_id: id, ...o, retirado: !!o.retirado, sucesor: o.sucesor ?? null, revisado_en: o.revisado_en ?? null, updated_at: new Date().toISOString() }
+    const { error } = await supabase.from('meam_variants').upsert(fila, { onConflict: 'usuario_id,ejercicio' })
+    if (error) {
+      // columnas de la revisión (SQL v2.8.2) aún sin crear: se guarda el resto y se avisa
+      const { retirado: _r, sucesor: _s, revisado_en: _v, ...sinRevision } = fila
+      void _r; void _s; void _v
+      const { error: e2 } = await supabase.from('meam_variants').upsert(sinRevision, { onConflict: 'usuario_id,ejercicio' })
+      if (e2) throw error
+      console.warn('[MEAM] meam_variants sin columnas retirado/sucesor/revisado_en: ejecuta supabase_v2.8.2_meam.sql (la revisión no se ha guardado)')
+      return false
+    }
     return true
   } catch (e) {
     console.warn('[MEAM] no se pudo guardar la variante revisada:', e)

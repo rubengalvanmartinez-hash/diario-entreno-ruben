@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.8.1'
+export const APP_VERSION = '2.8.2'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,16 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.8.2',
+    fecha: '29/09/2026',
+    tipo: 'media',
+    cambios: [
+      'Evidencia de adaptación: "Revisar ejercicios". La app propone, uno a uno, los ejercicios sin sesión en más de 16 semanas (los que seguían contando en su músculo con números viejos) y tú decides: lo hereda otro ejercicio (p. ej. la máquina nueva con nombre nuevo: pasan a ser uno solo para el motor, con bloque nuevo desde la primera sesión del heredero, sin mezclar kilos), retirarlo del cálculo o "sigo usándolo". Sugiere el heredero cuando otro ejercicio del mismo músculo empezó justo al dejar el viejo. Ejecutar supabase_v2.8.2_meam.sql (tres columnas en meam_variants); sin el SQL la decisión se aplica solo en la sesión',
+      '"Analizar desde" (3 meses / 6 meses / 1 año / todo): qué sesiones entran al motor; útil para analizar solo desde que se corrigieron las máquinas. Con el periodo acotado no se guardan snapshots',
+      '"Resumen del periodo" (1 mes / 3 / 6 / 1 año / todo) en el "¿Por qué?" de cada músculo: estado semana a semana, semanas en cada color, volumen medio y, por ejercicio, fuerza estimada primera → última del periodo (con aviso de si la diferencia está dentro del ruido) y mejor marca con fecha. Descriptivo: el estado del motor sigue saliendo de las últimas 16 semanas',
+    ],
+  },
   {
     version: '2.8.1',
     fecha: '29/09/2026',

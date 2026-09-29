@@ -59,6 +59,10 @@ export interface InformeEjercicio {
   /** días desde la última exposición anterior al corte hasta el corte (las de la semana en curso van en nEstaSemana) */
   diasDesdeUltima: number
   erratasDetalle: ErrataDetalle[]
+  /** ejercicios cuyo historial hereda este (revisión «sucesor de») */
+  heredaDe: string[]
+  /** todas las exposiciones anteriores al corte (para el resumen del periodo): fecha, fuerza estimada y tipo de sesión */
+  serie: Array<{ fecha: string; e1rm: number; tipo: string }>
   /** mejor marca de las (hasta) 12 exposiciones anteriores a las últimas 6 del bloque: la referencia de «sin récord» */
   mejorMarca: DerivedVariant['mejorMarca']
 }
@@ -81,6 +85,8 @@ export interface InformeMusculo {
   /** última exposición de cualquier ejercicio del músculo antes del corte ('' si ninguna) y días hasta el corte: sin sesiones nuevas el estado se congela (engine: hasNew) */
   ultimaSesion: string
   diasSinSesion: number
+  /** series de trabajo por semana (lunes) de todo el histórico del músculo, para el resumen del periodo */
+  volumenSemanal: Array<{ lunes: string; series: number }>
   accion: string
   textoUsuario: string
   cambioKg: [number, number] | null    // IC del cambio total en la ventana, en kg de e1RM (media de clusters)
@@ -102,6 +108,10 @@ export interface InformeMeam {
   musculos: InformeMusculo[]
   /** músculos con ejercicios registrados pero sin ninguno con ≥ 3 exposiciones (no tienen tarjeta): se explica por qué */
   musculosSinTarjeta: Array<{ musculo: MeamMuscle; nombre: string; ejercicios: EjercicioFuera[] }>
+  /** todos los ejercicios con registro (tras aplicar herencias y retiros), para la revisión de ejercicios sin uso */
+  variantes: Array<{ key: string; nombre: string; meta: VariantMeta; primeraFecha: string; ultimaFecha: string; nRegistros: number; heredaDe: string[] }>
+  /** ejercicios ya revisados por el usuario: retirados o heredados por otro */
+  revisados: Array<{ key: string; nombre: string; retirado: boolean; sucesor: string | null; sucesorNombre: string }>
   nombresSinMapa: string[]
   pesoPendientePctSem: number         // pendiente del peso corporal (%/sem), NaN sin datos
   faseNutricional: 'deficit' | 'mantenimiento' | 'superavit' | 'desconocida'
@@ -410,6 +420,7 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
         nErr: v.n_err, spanSemanas: v.time_span_weeks, interrupcionReciente: v.interruption_recent,
         diasDesdeUltima: ultimaFecha ? diasEntre(ultimaFecha, corteIsoActual) : 0,
         erratasDetalle: erratasAlCorte.map((x) => ({ fecha: x.fecha, sesionId: x.sesionId, topReps: x.topReps, e1rm: x.e1rm, esperado: x.e1rmEsperado, pesoRegistrado: registrado(x), tipoCarga })),
+        heredaDe: dv.heredaDe, serie: alCorte.map((x) => ({ fecha: x.fecha, e1rm: x.e1rm, tipo: x.tipo })),
         mejorMarca: dv.mejorMarca,
       }
     })
@@ -430,6 +441,7 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
       musculo, nombre: MUSCULOS_MEAM[musculo], semana: corteIso(corte), estado: fila.adaptation, etiqueta: fila.adapt_label, recuperacion: fila.recovery,
       etiquetaRecuperacion: fila.rec_label, confianza: conf, motivosConfianza: conf === 'BAJA' ? motivosBajaConfianza(fila, nombresPorVid) : [], motivoInconcluyente: motivoInconcluyenteDe(fila, ejercicios, ejerciciosFuera), ejerciciosFuera,
       ultimaSesion, diasSinSesion: ultimaSesion ? diasEntre(ultimaSesion, corteIsoActual) : 0,
+      volumenSemanal: semanasVol.map((s) => ({ lunes: s.lunes, series: s.series })),
       accion: `${accionTitulo} ${accionTexto}`.trim(), textoUsuario: '', cambioKg,
       T: fila.T, D: fila.D, sigmaPct: fila.sigma_pct, rho: fila.rho, rhoCalibrado: rhoCal, volumenSeriesSemana: volSem, volumenPercentil: volPct,
       frecuenciaSemanal: sesionesUlt3 / 3, contextoAlto: ctxAlto.has(corte), ejercicios, flags: fila.flags ? fila.flags.split(',') : [], fila, historial: rows,
@@ -442,6 +454,8 @@ export function ejecutarMeam(sesiones: readonly SesionConTipo[], mapa: ReadonlyM
   // no reconoce van a 'otros' y el bucle los salta. Se listan aquí para que no desaparezcan de la pantalla sin aviso (auditoría 8, A2).
   const sinMapa = new Set(der.nombresSinMapa)
   for (const dv of der.variantes.values()) if (dv.meta.musculo === 'otros') sinMapa.add(dv.meta.nombre)
-  return { epoch: der.epoch, hoy, corte: isoAddDays(der.epoch, ultimoCorte * 7), musculos, musculosSinTarjeta, nombresSinMapa: [...sinMapa].sort(), pesoPendientePctSem: pesoSlope, faseNutricional: fase,
+  const variantes = [...der.variantes.values()].map((dv) => ({ key: dv.meta.key, nombre: dv.meta.nombre, meta: dv.meta, primeraFecha: dv.primeraFecha, ultimaFecha: dv.ultimaFecha, nRegistros: dv.nRegistros, heredaDe: dv.heredaDe }))
+  const revisados = [...mapa.values()].filter((m) => m.retirado || m.sucesor).map((m) => ({ key: m.key, nombre: m.nombre, retirado: !!m.retirado, sucesor: m.sucesor ?? null, sucesorNombre: m.sucesor ? (mapa.get(m.sucesor)?.nombre ?? m.sucesor) : '' }))
+  return { epoch: der.epoch, hoy, corte: isoAddDays(der.epoch, ultimoCorte * 7), musculos, musculosSinTarjeta, variantes, revisados, nombresSinMapa: [...sinMapa].sort(), pesoPendientePctSem: pesoSlope, faseNutricional: fase,
     modelVersion: CFG.model_version, configVersion: CFG.config_version }
 }

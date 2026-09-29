@@ -66,6 +66,11 @@ export interface DerivedVariant {
   nSinE1rmPorReps: number
   /** sesiones sin e1RM por no tener carga utilizable (sin kilos o sin reps apuntados, o asistido/lastre sin peso corporal registrado) */
   nSinE1rmPorCarga: number
+  /** nombres de los ejercicios cuyo historial hereda esta variante (revisión «sucesor de»); el cambio abre bloque nuevo */
+  heredaDe: string[]
+  /** primera y última fecha con registro (con o sin exposición) */
+  primeraFecha: string
+  ultimaFecha: string
 }
 
 export interface SemanaVolumen { lunes: string; semana: number; series: number; duras: number }
@@ -145,16 +150,39 @@ export function derivarExposiciones(sesiones: readonly SesionConTipo[], mapa: Re
   if (filas.length === 0) return { epoch: lunesDeIso(new Date().toISOString().slice(0, 10)), variantes, volumenPorMusculo: new Map(), nombresSinMapa: [] }
   const epoch = lunesDeIso(filas[0].fecha)
   const tDe = (fecha: string): number => diasEntre(epoch, fecha) / 7
+  // revisión del usuario: un ejercicio retirado sale del cálculo; uno con sucesor vuelca su historial en el sucesor (cadena, con tope)
+  // (un ciclo A→B→A o una cadena demasiado larga anula la revisión: se deja cada ejercicio como está — auditoría 9)
+  const destinoDe = (key: string): string | null => {
+    let k = key; const vistos = new Set([key])
+    for (let i = 0; i < 5; i++) {
+      const m = mapa.get(k)
+      if (!m) return k
+      if (m.sucesor && mapa.has(m.sucesor)) { if (vistos.has(m.sucesor)) return key; vistos.add(m.sucesor); k = m.sucesor; continue }
+      return m.retirado ? null : k
+    }
+    return key
+  }
+  const heredoAntes = new Set<string>(), propiaVista = new Set<string>()
   // historial por variante para inferir deload y erratas (causal: solo sesiones anteriores)
   type Hist = { sets: number[]; loads: number[]; lnE1rm: number[]; fechas: string[]; racha: ExposureExtra[]; rachaSigno: number; ultimaFecha: string }
   const nuevoHist = (): Hist => ({ sets: [], loads: [], lnE1rm: [], fechas: [], racha: [], rachaSigno: 0, ultimaFecha: '' })
   const hist = new Map<string, Hist>()
-  for (const f of filas) {
+  for (const f0 of filas) {
+    const destino = destinoDe(f0.key)
+    if (destino === null) continue                       // retirado sin heredero: fuera del cálculo
+    const heredada = destino !== f0.key
+    const f = heredada ? { ...f0, key: destino } : f0
     let meta = mapa.get(f.key)
     if (!meta) { sinMapa.add(f.nombre); meta = { key: f.key, nombre: f.nombre, musculo: 'otros', cluster: 'OTROS', role: 'DIRECT', equipment: 'compound_free', esAsistencia: false, aislamiento: false, inferido: true } }
-    if (!variantes.has(f.key)) variantes.set(f.key, { meta, exps: [], extras: [], erratas: [], repsSinE1rm: [], sinMejoraEn6: false, mejorMarca: null, bloqueDesde: null, rupturasPropuestas: [], nRegistros: 0, nSinE1rmPorReps: 0, nSinE1rmPorCarga: 0 })
+    if (!variantes.has(f.key)) variantes.set(f.key, { meta, exps: [], extras: [], erratas: [], repsSinE1rm: [], sinMejoraEn6: false, mejorMarca: null, bloqueDesde: null, rupturasPropuestas: [], nRegistros: 0, nSinE1rmPorReps: 0, nSinE1rmPorCarga: 0, heredaDe: [], primeraFecha: f.fecha, ultimaFecha: f.fecha })
     const dv = variantes.get(f.key)!
     dv.nRegistros++
+    dv.ultimaFecha = f.fecha
+    if (heredada) { heredoAntes.add(f.key); if (!dv.heredaDe.includes(f0.nombre)) dv.heredaDe.push(f0.nombre) }
+    // primera sesión propia del heredero tras las heredadas: máquina nueva ⇒ ruptura de protocolo (bloque nuevo) y referencia de erratas limpia
+    // se borra el historial de erratas/deload aquí (y no más abajo) para que valga aunque esta sesión no llegue a tener e1RM (auditoría 9)
+    if (!heredada && heredoAntes.has(f.key) && !propiaVista.has(f.key)) { dv.rupturasPropuestas.push(tDe(f.fecha)); hist.delete(f.key) }
+    if (!heredada) propiaVista.add(f.key)
     const t = tDe(f.fecha)
     // --- volumen semanal por músculo (series con datos y series duras) ---
     const lunes = lunesDeIso(f.fecha)

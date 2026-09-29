@@ -31,6 +31,9 @@ export interface VariantMeta {
   aislamiento: boolean
   /** true si se asignó por palabras clave; false si viene de la tabla meam_variants (revisado por el usuario) */
   inferido: boolean
+  /** revisión del usuario: retirado = fuera del cálculo; sucesor = clave del ejercicio que hereda su historial (otra máquina con nombre nuevo) */
+  retirado?: boolean
+  sucesor?: string | null
 }
 
 interface Regla { claves: string[]; musculo: MeamMuscle; cluster: string; equipment: EquipmentClass; aislamiento: boolean; role?: VariantRole }
@@ -82,6 +85,10 @@ export interface VariantOverride {
   equipment: EquipmentClass
   es_asistencia: boolean
   aislamiento: boolean
+  /** revisión de ejercicios sin uso (v2.8.2): retirado, heredado por `sucesor` (clave canónica) o «sigo usándolo» (solo revisado_en) */
+  retirado?: boolean
+  sucesor?: string | null
+  revisado_en?: string | null
 }
 
 /**
@@ -96,7 +103,7 @@ export function construirMapaVariantes(nombres: Iterable<string>, overrides: rea
     if (out.has(key)) continue
     const o = ov.get(key)
     if (o) {
-      out.set(key, { key, nombre, musculo: o.musculo, cluster: o.cluster, role: o.role, equipment: o.equipment, esAsistencia: o.es_asistencia, aislamiento: o.aislamiento, inferido: false })
+      out.set(key, { key, nombre, musculo: o.musculo, cluster: o.cluster, role: o.role, equipment: o.equipment, esAsistencia: o.es_asistencia, aislamiento: o.aislamiento, inferido: false, retirado: !!o.retirado, sucesor: o.sucesor ?? null })
     } else {
       out.set(key, inferirVariante(nombre, asistencia.has(key)))
     }
