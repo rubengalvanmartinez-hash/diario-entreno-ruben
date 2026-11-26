@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import {
   ChevronUp, ChevronDown, Trash2, Plus, ImagePlus,
   X, LogOut, FileSpreadsheet, RefreshCw, CheckCircle2, AlertCircle, ChevronRight, Users, Database, MapPin,
+  PauseCircle, ArrowUpDown, Undo2,
 } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
-import { getUsuarioActivo, cerrarSesionLocal, sincronizarEjerciciosUsuario, supabase, forzarSincronizacionPendientes, getRubenUUID, cargarDatosUsuario, asegurarUsuarioRuben, setEquivalenciaSync } from '../services/supabase'
+import { getUsuarioActivo, cerrarSesionLocal, sincronizarEjerciciosUsuario, supabase, forzarSincronizacionPendientes, getRubenUUID, cargarDatosUsuario, asegurarUsuarioRuben, setEquivalenciaSync, comprobarColumnasV280 } from '../services/supabase'
 import {
   iniciarSesionGoogle,
   cerrarSesionGoogle,
@@ -64,7 +65,9 @@ export default function AjustesPage() {
 
       <section className="flex flex-col gap-5">
         <SectionLabel>Ejercicios por día</SectionLabel>
+        {usuarioActivo?.esAdmin && <AvisoColumnasPendientes />}
         {DIAS.map((dia) => <SeccionDia key={dia} dia={dia} />)}
+        <SeccionSuspendidos />
       </section>
 
       <section className="flex flex-col gap-3">
@@ -145,10 +148,12 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function SeccionDia({ dia }: { dia: DiaId }) {
   const [abierto, setAbierto] = useState(false)
+  const [ordenando, setOrdenando] = useState(false)
 
+  // Solo los activos: los ejercicios en suspenso viven en su propia sección
   const ejercicios = useFitLogStore(
     useShallow((s) =>
-      s.ejercicios.filter((e) => e.dia === dia).sort((a, b) => a.orden - b.orden),
+      s.ejercicios.filter((e) => e.dia === dia && !e.suspendido).sort((a, b) => a.orden - b.orden),
     ),
   )
   const agregarEjercicio     = useFitLogStore((s) => s.agregarEjercicio)
@@ -195,9 +200,60 @@ function SeccionDia({ dia }: { dia: DiaId }) {
         }
       </button>
 
-      {/* Contenido desplegable */}
-      {abierto && (
+      {/* Contenido desplegable: modo Ordenar (lista compacta) */}
+      {abierto && ordenando && (
         <div className="flex flex-col gap-2 px-3 pt-3 pb-3 border-t border-zinc-800 bg-zinc-950/40">
+          <p className="text-xs text-zinc-500 px-1">
+            Usa las flechas para cambiar el orden. Las sesiones de {DIA_NOMBRE[dia]} seguirán este orden.
+          </p>
+          <ol className="flex flex-col gap-1.5">
+            {ejercicios.map((ej, idx) => (
+              <li key={ej.id} className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl pl-3 pr-1.5 py-1.5">
+                <span className="w-5 text-center text-xs font-bold text-zinc-500 tabular-nums shrink-0">{idx + 1}</span>
+                <span className="flex-1 min-w-0 truncate text-sm font-semibold text-white">{ej.nombre}</span>
+                <button
+                  onClick={() => handleMover(ej.id, 'arriba')}
+                  disabled={idx === 0}
+                  aria-label={`Subir ${ej.nombre}`}
+                  className="size-10 flex items-center justify-center rounded-lg bg-zinc-800 text-zinc-300
+                             disabled:opacity-20 active:bg-zinc-700 shrink-0"
+                >
+                  <ChevronUp size={20} />
+                </button>
+                <button
+                  onClick={() => handleMover(ej.id, 'abajo')}
+                  disabled={idx === ejercicios.length - 1}
+                  aria-label={`Bajar ${ej.nombre}`}
+                  className="size-10 flex items-center justify-center rounded-lg bg-zinc-800 text-zinc-300
+                             disabled:opacity-20 active:bg-zinc-700 shrink-0"
+                >
+                  <ChevronDown size={20} />
+                </button>
+              </li>
+            ))}
+          </ol>
+          <button
+            onClick={() => setOrdenando(false)}
+            className="mt-1 rounded-2xl bg-blue-600 py-3 text-sm font-bold text-white active:bg-blue-700"
+          >
+            Listo
+          </button>
+        </div>
+      )}
+
+      {/* Contenido desplegable: edición completa */}
+      {abierto && !ordenando && (
+        <div className="flex flex-col gap-2 px-3 pt-3 pb-3 border-t border-zinc-800 bg-zinc-950/40">
+          {ejercicios.length > 1 && (
+            <button
+              onClick={() => setOrdenando(true)}
+              className="flex items-center justify-center gap-2 rounded-2xl border border-zinc-700 bg-zinc-900
+                         py-2.5 text-sm font-semibold text-zinc-300 active:bg-zinc-800"
+            >
+              <ArrowUpDown size={16} />
+              Ordenar ejercicios
+            </button>
+          )}
           {ejercicios.map((ej, idx) => (
             <EjercicioCard
               key={ej.id}
@@ -347,6 +403,7 @@ function EjercicioCard({
 }) {
   const actualizarEjercicio = useFitLogStore((s) => s.actualizarEjercicio)
   const moverEjercicio      = useFitLogStore((s) => s.moverEjercicio)
+  const suspenderEjercicio  = useFitLogStore((s) => s.suspenderEjercicio)
 
   const [nombre, setNombre]           = useState(ejercicio.nombre)
   const [notas, setNotas]             = useState(ejercicio.notasFijas)
@@ -485,7 +542,32 @@ function EjercicioCard({
             {DIA_NOMBRE[d]}
           </button>
         ))}
+        <button
+          onClick={() => suspenderEjercicio(ejercicio.id)}
+          className="flex items-center gap-1 rounded-full border border-amber-500/40 px-3 py-1 text-xs font-semibold
+                     text-amber-300 active:bg-amber-500/10"
+          title="Lo saca de la rutina sin borrarlo; se recupera desde «En suspenso»"
+        >
+          <PauseCircle size={13} />
+          Suspender
+        </button>
       </div>
+
+      {/* Cada lado por separado (reps derecho / izquierdo) */}
+      <label className="flex items-center gap-3 px-1 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={!!ejercicio.unilateral}
+          onChange={(e) => actualizarEjercicio(ejercicio.id, { unilateral: e.target.checked })}
+          className="size-5 accent-blue-500 shrink-0"
+        />
+        <span className="text-sm text-zinc-300 leading-tight">
+          Cada lado por separado
+          <span className="block text-[11px] text-zinc-500">
+            Reps del brazo/pierna derecho e izquierdo (p. ej. curl martillo)
+          </span>
+        </span>
+      </label>
 
       {/* Row 2: imagen */}
       <div className="flex items-center gap-3">
@@ -535,6 +617,107 @@ function EjercicioCard({
           onCerrar={() => setShowModal(false)}
         />
       )}
+    </div>
+  )
+}
+
+// ── SeccionSuspendidos ────────────────────────────────────────────────────────
+// Ejercicios fuera de la rutina pero conservados (id, día de origen, notas e
+// historial). Se recuperan al final del día que se elija.
+
+function SeccionSuspendidos() {
+  const [abierto, setAbierto] = useState(false)
+  const suspendidos = useFitLogStore(
+    useShallow((s) =>
+      s.ejercicios
+        .filter((e) => e.suspendido)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' })),
+    ),
+  )
+  const recuperarEjercicio = useFitLogStore((s) => s.recuperarEjercicio)
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 overflow-hidden">
+      <button
+        onClick={() => setAbierto((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-3.5 bg-zinc-900 active:bg-zinc-800/80 transition-colors"
+      >
+        <span className="size-6 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
+          <PauseCircle size={14} className="text-amber-400" />
+        </span>
+        <span className="font-bold text-white flex-1 text-left">En suspenso</span>
+        <span className="text-xs text-zinc-500">
+          {suspendidos.length} ejercicio{suspendidos.length !== 1 ? 's' : ''}
+        </span>
+        {abierto
+          ? <ChevronUp size={16} className="text-zinc-400 shrink-0" />
+          : <ChevronDown size={16} className="text-zinc-400 shrink-0" />
+        }
+      </button>
+
+      {abierto && (
+        <div className="flex flex-col gap-2 px-3 pt-3 pb-3 border-t border-zinc-800 bg-zinc-950/40">
+          {suspendidos.length === 0 ? (
+            <p className="text-xs text-zinc-500 px-1 py-2 leading-relaxed">
+              No hay ejercicios en suspenso. Pulsa «Suspender» en un ejercicio para sacarlo de la
+              rutina sin borrarlo: conserva su historial y aquí podrás recuperarlo cuando quieras.
+            </p>
+          ) : (
+            suspendidos.map((ej) => (
+              <div key={ej.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3.5 flex flex-col gap-2.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm font-semibold text-white truncate">{ej.nombre}</span>
+                  <span className="text-[11px] text-zinc-500 shrink-0">era de {DIA_NOMBRE[ej.dia]}</span>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-zinc-500">
+                    <Undo2 size={12} /> Recuperar en
+                  </span>
+                  {DIAS.map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => recuperarEjercicio(ej.id, d)}
+                      className={[
+                        'rounded-full border px-3 py-1 text-xs font-semibold',
+                        d === ej.dia
+                          ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300 active:bg-emerald-500/20'
+                          : 'border-zinc-700 text-zinc-300 active:bg-zinc-800',
+                      ].join(' ')}
+                    >
+                      {DIA_NOMBRE[d]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── AvisoColumnasPendientes ───────────────────────────────────────────────────
+// Solo admin: avisa si falta ejecutar el SQL de la v2.8.0 en Supabase.
+
+function AvisoColumnasPendientes() {
+  const [faltan, setFaltan] = useState<string[]>([])
+  useEffect(() => {
+    let vivo = true
+    comprobarColumnasV280().then((f) => { if (vivo) setFaltan(f) }).catch(() => {})
+    return () => { vivo = false }
+  }, [])
+  if (faltan.length === 0) return null
+  return (
+    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex gap-2.5">
+      <AlertCircle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+      <div className="min-w-0 text-xs leading-relaxed">
+        <p className="font-bold text-amber-300">Falta actualizar la base de datos (SQL v2.8.0)</p>
+        <p className="text-amber-200/80 mt-0.5">
+          Hasta entonces, «En suspenso», «Cada lado por separado» y las reps del lado izquierdo solo
+          se guardan en este móvil. Columnas que faltan: {faltan.join(', ')}.
+        </p>
+      </div>
     </div>
   )
 }

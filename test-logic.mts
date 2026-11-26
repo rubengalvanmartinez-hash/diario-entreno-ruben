@@ -1,6 +1,6 @@
 // Tests de lógica pura — bundle con rolldown y ejecutar con node (ver memoria / changelog 2.2.7)
 import { normalizarNombre, nombreCanonico, matchesEjercicio } from './src/utils/normalizar'
-import { serieConDatos } from './src/types/models'
+import { serieConDatos, textoReps, esSerieUnilateral, crearSeriesVacias, crearSesionEjercicio } from './src/types/models'
 import { DEFAULT_EJERCICIOS, esConfigPorDefecto } from './src/store/defaultData'
 import { grupoDeEjercicio } from './src/utils/gruposMusculares'
 import { factorEquivalencia, tieneEquivalencia, aReferencia, aGimnasio, factorDesdePareja, redondearPeso, sesionAReferencia, historialAReferencia } from './src/utils/equivalencias'
@@ -151,6 +151,28 @@ const deload2 = evaluarDeload(analizarProgresion(histProg2, '2026-08-23'), '2026
 check('deload SÍ con 3 afectados recientes', deload2.sugerir === true && deload2.afectados.length === 3)
 const deload3 = evaluarDeload(analizarProgresion(histProg2, '2026-10-01'), '2026-10-01')
 check('deload NO si hace >21 días que no se entrenan', deload3.sugerir === false)
+
+
+// ── v2.8.0: reps por lado (unilateral) ───────────────────────────────────────
+check('textoReps normal', textoReps({ reps: 10 }) === '10')
+check('textoReps vacío', textoReps({ reps: '' }) === '—')
+check('textoReps D/I', textoReps({ reps: 10, repsIzq: 9 }) === '10/9')
+check('textoReps D/I con izq vacío', textoReps({ reps: 10, repsIzq: '' }) === '10/—')
+check('esSerieUnilateral', esSerieUnilateral({ repsIzq: '' }) && !esSerieUnilateral({}))
+check('serieConDatos solo con reps izq', serieConDatos({ reps: '', repsIzq: 8, pesoKg: '' }))
+check('serieConDatos vacía unilateral', !serieConDatos({ reps: '', repsIzq: '', pesoKg: '' }))
+check('crearSeriesVacias unilateral lleva repsIzq', crearSeriesVacias(2, true).every((x) => x.repsIzq === ''))
+check('crearSeriesVacias normal sin repsIzq', crearSeriesVacias(2).every((x) => !('repsIzq' in x)))
+const sejU = crearSesionEjercicio({ id: 'x', nombre: 'Curl martillo', dia: 1, seriesPorDefecto: 3, notasFijas: '', orden: 0, unilateral: true })
+check('crearSesionEjercicio unilateral', sejU.unilateral === true && sejU.series.length === 3 && sejU.series.every(esSerieUnilateral))
+const sejN = crearSesionEjercicio({ id: 'y', nombre: 'Press', dia: 1, seriesPorDefecto: 3, notasFijas: '', orden: 0 })
+check('crearSesionEjercicio normal', sejN.unilateral === undefined && !sejN.series.some(esSerieUnilateral))
+
+// ── v2.8.0: orden alfabético dentro de cada estado de progresión ────────────
+const ordenEst: Record<string, number> = { regresion: 0, estancado: 1, estable: 2, progresando: 3 }
+check('progresión: mismo estado → alfabético', analisis.every((a, i) => i === 0
+  || ordenEst[analisis[i - 1].estado] < ordenEst[a.estado]
+  || (analisis[i - 1].estado === a.estado && analisis[i - 1].nombre.localeCompare(a.nombre, 'es', { sensitivity: 'base' }) <= 0)))
 
 console.log(fallos === 0 ? '\nTODOS LOS TESTS PASAN' : `\n${fallos} TESTS FALLAN`)
 process.exit(fallos === 0 ? 0 : 1)

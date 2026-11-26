@@ -219,7 +219,7 @@ function ParcialModal({ onClose, onStart }: { onClose: () => void; onStart: () =
     dia,
     label: `Día ${dia}`,
     ejercicios: ejercicios
-      .filter((e) => e.dia === dia)
+      .filter((e) => e.dia === dia && !e.suspendido)
       .sort((a, b) => a.orden - b.orden),
   }))
 

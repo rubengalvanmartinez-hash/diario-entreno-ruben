@@ -345,16 +345,41 @@ function SVGBarChart({ data, color = '#3b82f6', height = 110 }: BarChartProps) {
 
 // ── Calendario de calor ───────────────────────────────────────────────────────
 
-function CalendarioCalor({ sesionDates }: { sesionDates: Set<string> }) {
+/** Tipo de día para colorear el calendario: 1, 2, 3 o 'otro' (parcial / extra) */
+type TipoDiaCal = 1 | 2 | 3 | 'otro'
+
+/** Colores del calendario por día de rutina (Día 1 azul, Día 2 verde, Día 3 amarillo) */
+const COLOR_DIA_CAL: Record<TipoDiaCal, { hex: string; label: string }> = {
+  1:      { hex: '#3b82f6', label: 'Día 1' },
+  2:      { hex: '#10b981', label: 'Día 2' },
+  3:      { hex: '#facc15', label: 'Día 3' },
+  otro:   { hex: '#a855f7', label: 'Parcial / extra' },
+}
+
+const ORDEN_DIA_CAL: TipoDiaCal[] = [1, 2, 3, 'otro']
+
+function tipoDiaCal(dia: Sesion['dia']): TipoDiaCal {
+  return dia === 1 || dia === 2 || dia === 3 ? dia : 'otro'
+}
+
+/** Fondo de una celda: color sólido si hubo un tipo de día; franjas diagonales si hubo varios */
+function fondoCeldaCal(tipos: TipoDiaCal[]): string {
+  if (tipos.length === 1) return COLOR_DIA_CAL[tipos[0]].hex
+  const paso = 100 / tipos.length
+  const tramos = tipos.map((t, i) => `${COLOR_DIA_CAL[t].hex} ${i * paso}% ${(i + 1) * paso}%`)
+  return `linear-gradient(135deg, ${tramos.join(', ')})`
+}
+
+function CalendarioCalor({ diasPorFecha }: { diasPorFecha: Map<string, TipoDiaCal[]> }) {
   // Build 60-day array starting from Monday of the week that includes 59 days ago
   const days = useMemo(() => {
     return Array.from({ length: 60 }, (_, i) => {
       const d = new Date()
       d.setDate(d.getDate() - (59 - i))
       const iso = d.toISOString().slice(0, 10)
-      return { iso, trained: sesionDates.has(iso), month: d.getMonth(), day: d.getDate() }
+      return { iso, tipos: diasPorFecha.get(iso) ?? [], month: d.getMonth(), day: d.getDate() }
     })
-  }, [sesionDates])
+  }, [diasPorFecha])
 
   // Monday offset for the first day
   const firstDate   = new Date(days[0].iso)
@@ -381,20 +406,33 @@ function CalendarioCalor({ sesionDates }: { sesionDates: Set<string> }) {
         {Array.from({ length: startOffset }, (_, i) => (
           <div key={`e${i}`} className="aspect-square" />
         ))}
-        {days.map(({ iso, trained, day }) => (
+        {days.map(({ iso, tipos, day }) => (
           <div
             key={iso}
-            title={`${iso}${trained ? ' ✓' : ''}`}
-            className={[
-              'aspect-square rounded-sm',
-              trained ? 'bg-emerald-500/75' : 'bg-zinc-800',
-            ].join(' ')}
+            title={`${iso}${tipos.length ? ' · ' + tipos.map((t) => COLOR_DIA_CAL[t].label).join(' + ') : ''}`}
+            className={['aspect-square rounded-sm', tipos.length ? '' : 'bg-zinc-800'].join(' ')}
+            style={tipos.length ? { background: fondoCeldaCal(tipos) } : undefined}
           >
             {day === 1 && (
-              <span className="text-[7px] text-zinc-600 leading-none pl-px">{iso.slice(5, 7)}</span>
+              <span className={['text-[7px] leading-none pl-px', tipos.length ? 'text-black/60' : 'text-zinc-600'].join(' ')}>
+                {iso.slice(5, 7)}
+              </span>
             )}
           </div>
         ))}
+      </div>
+      {/* Leyenda */}
+      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 mt-1.5">
+        {ORDEN_DIA_CAL.map((t) => (
+            <span key={t} className="flex items-center gap-1">
+              <span className="size-3 rounded-sm" style={{ background: COLOR_DIA_CAL[t].hex }} />
+              <span className="text-[10px] text-zinc-500">{COLOR_DIA_CAL[t].label}</span>
+            </span>
+        ))}
+        <span className="flex items-center gap-1">
+          <span className="size-3 rounded-sm bg-zinc-800" />
+          <span className="text-[10px] text-zinc-500">Sin entreno</span>
+        </span>
       </div>
     </div>
   )
@@ -593,11 +631,15 @@ function ResumenGeneral() {
     return diasDesdeISO(last.fecha)
   }, [historial])
 
-  // Set de fechas con sesión
-  const sesionDates = useMemo(
-    () => new Set(historial.map((s) => s.fecha)),
-    [historial],
-  )
+  // Fecha → tipos de día entrenados (1, 2, 3, 'otro'), sin repetir y en orden
+  const diasPorFecha = useMemo(() => {
+    const m = new Map<string, Set<TipoDiaCal>>()
+    for (const s of historial) {
+      if (!m.has(s.fecha)) m.set(s.fecha, new Set())
+      m.get(s.fecha)!.add(tipoDiaCal(s.dia))
+    }
+    return new Map([...m].map(([f, set]) => [f, ORDEN_DIA_CAL.filter((t) => set.has(t))]))
+  }, [historial])
 
   // Frecuencia semanal — últimas 9 semanas
   const weeklyBars = useMemo(() => {
@@ -618,8 +660,9 @@ function ResumenGeneral() {
 
   // Personal Records
   const personalRecords = useMemo(() => {
-    return ejercicios
-      .sort((a, b) => a.dia - b.dia || a.orden - b.orden)
+    // Orden alfabético (copia: no mutar el array del store)
+    return [...ejercicios]
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }))
       .flatMap((ej) => {
         let mejorPeso = 0, mejor1RM = 0, mejorFecha = ''
         historial.forEach((ses) => {
@@ -682,13 +725,7 @@ function ResumenGeneral() {
         <p className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-3">
           Últimos 60 días
         </p>
-        <CalendarioCalor sesionDates={sesionDates} />
-        <div className="flex items-center gap-2 mt-3 justify-end">
-          <div className="size-3 rounded-sm bg-zinc-800" />
-          <span className="text-[10px] text-zinc-600">Sin entreno</span>
-          <div className="size-3 rounded-sm bg-emerald-500/75 ml-1" />
-          <span className="text-[10px] text-zinc-600">Entrenado</span>
-        </div>
+        <CalendarioCalor diasPorFecha={diasPorFecha} />
       </div>
 
       {/* Frecuencia semanal */}

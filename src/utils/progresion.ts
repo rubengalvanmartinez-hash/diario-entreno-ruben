@@ -167,9 +167,11 @@ export function analizarProgresion(
     })
   }
 
-  // Orden: peor primero (regresión, estancado, estable, progresando), luego más reciente
+  // Orden: peor primero (regresión, estancado, estable, progresando) y, dentro
+  // de cada estado, alfabético por nombre
   const peso: Record<EstadoProgresion, number> = { regresion: 0, estancado: 1, estable: 2, progresando: 3 }
-  resultado.sort((a, b) => peso[a.estado] - peso[b.estado] || b.ultimaFecha.localeCompare(a.ultimaFecha))
+  resultado.sort((a, b) =>
+    peso[a.estado] - peso[b.estado] || a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }))
   return resultado
 }
 

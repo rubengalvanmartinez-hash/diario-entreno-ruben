@@ -5,7 +5,7 @@ import type { EtiquetaSerie, Sesion } from '../types/models'
 import { obtenerImagen } from '../services/imageDB'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore, selectProgresoTotal, selectProgresoCompletados } from '../store/useFitLogStore'
-import { serieConDatos, GIMNASIOS, type DiaId, type SesionEjercicio, type Serie, type GimnasioId } from '../types/models'
+import { serieConDatos, esSerieUnilateral, textoReps, GIMNASIOS, type DiaId, type SesionEjercicio, type Serie, type GimnasioId } from '../types/models'
 import { useHistorialRef } from '../hooks/useHistorialRef'
 import { factorEquivalencia, tieneEquivalencia, aGimnasio, redondearPeso, factorDesdePareja, sesionAReferencia } from '../utils/equivalencias'
 import { setEquivalenciaSync } from '../services/supabase'
@@ -544,6 +544,10 @@ function EjercicioCard({
   const notasFijas = useFitLogStore(
     (s) => s.ejercicios.find((e) => e.id === ejercicio.ejercicioId)?.notasFijas ?? '',
   )
+  // Cada lado por separado: marcado en la sesión, en la configuración actual o ya hay series D/I
+  const unilateralCfg = useFitLogStore(
+    (s) => s.ejercicios.find((e) => e.id === ejercicio.ejercicioId)?.unilateral ?? false,
+  )
 
   // Último y penúltimo registro de este ejercicio (para comparación histórica)
   const { ultimoEntreno, penultimoEntreno, refMaxET } = useMemo(() => {
@@ -577,6 +581,17 @@ function EjercicioCard({
   const [pesosRaw, setPesosRaw] = useState<string[]>(() =>
     ejercicio.series.map((s) => (s.pesoKg === '' ? '' : String(s.pesoKg))),
   )
+  const unilateral = !!ejercicio.unilateral || unilateralCfg || series.some(esSerieUnilateral)
+
+  // Lados escritos a mano ("0-der", "0-izq"…). Al escribir en un lado, el otro
+  // copia el valor mientras no se haya tocado a mano; así basta con rellenar
+  // uno y solo se corrige el otro si es distinto. Si al volver al ejercicio
+  // ya eran distintos, ambos cuentan como tocados (no se pisan).
+  const ladosTocados = useRef<Set<string>>(new Set(
+    ejercicio.series.flatMap((s, i) =>
+      esSerieUnilateral(s) && s.reps !== '' && s.repsIzq !== '' && s.reps !== s.repsIzq
+        ? [`${i}-der`, `${i}-izq`] : []),
+  ))
   const [nota,         setNota]         = useState(ejercicio.notaSesion)
   const [ayudaFede,    setAyudaFede]    = useState(ejercicio.ayudaFede ?? false)
   const [imagen,       setImagen]       = useState<string | null>(null)
@@ -647,9 +662,11 @@ function EjercicioCard({
         setSeries((prev) => ej.series.map((s, idx) => {
           const l = prev[idx]
           if (!l) return { ...s }
+          const repsIzq = l.repsIzq !== undefined && l.repsIzq !== '' ? l.repsIzq : s.repsIzq
           return {
             ...l,
             reps:   l.reps   !== '' ? l.reps   : s.reps,
+            ...(repsIzq !== undefined ? { repsIzq } : {}),
             pesoKg: l.pesoKg !== '' ? l.pesoKg : s.pesoKg,
             etiqueta: l.etiqueta ?? s.etiqueta,
           }
@@ -683,10 +700,24 @@ function EjercicioCard({
     })
   }, [indice])
 
-  const updateReps = (i: number, raw: string) => {
-    const val = raw === '' ? '' : Number(raw)
-    setSeries((prev) => prev.map((s, idx) => idx === i ? { ...s, reps: val } : s))
-    emitirOp({ t: 'serie', i: indice, s: i, campo: 'reps', valor: val })
+  const updateReps = (i: number, raw: string, lado: 'der' | 'izq' = 'der') => {
+    const limpio = raw.replace(/[^0-9]/g, '')
+    const val = limpio === '' ? '' : Number(limpio)
+    const campo = lado === 'der' ? 'reps' : 'repsIzq'
+    if (!unilateral) {
+      setSeries((prev) => prev.map((s, idx) => idx === i ? { ...s, reps: val } : s))
+      emitirOp({ t: 'serie', i: indice, s: i, campo: 'reps', valor: val })
+      return
+    }
+    ladosTocados.current.add(`${i}-${lado}`)
+    const otroLado = lado === 'der' ? 'izq' : 'der'
+    const otroCampo = lado === 'der' ? 'repsIzq' : 'reps'
+    const copiar = !ladosTocados.current.has(`${i}-${otroLado}`)
+    setSeries((prev) => prev.map((s, idx) => idx === i
+      ? { ...s, repsIzq: s.repsIzq ?? '', [campo]: val, ...(copiar ? { [otroCampo]: val } : {}) }
+      : s))
+    emitirOp({ t: 'serie', i: indice, s: i, campo, valor: val })
+    if (copiar) emitirOp({ t: 'serie', i: indice, s: i, campo: otroCampo, valor: val })
   }
 
   const updatePeso = (i: number, raw: string) => {
@@ -724,7 +755,11 @@ function EjercicioCard({
   }
 
   const addSerie = () => {
-    const nuevasSeries = [...series, { numero: series.length + 1, reps: '' as const, pesoKg: '' as const }]
+    const nuevasSeries: Serie[] = [...series, {
+      numero: series.length + 1, reps: '' as const,
+      ...(unilateral ? { repsIzq: '' as const } : {}),
+      pesoKg: '' as const,
+    }]
     setSeries(nuevasSeries)
     setPesosRaw((prev) => [...prev, ''])
     emitirOp({ t: 'series', i: indice, series: nuevasSeries })
@@ -742,7 +777,12 @@ function EjercicioCard({
     series.map((s, i) => {
       const raw = pesosRaw[i] ?? ''
       const num = parseFloat(raw.replace(',', '.'))
-      return { ...s, pesoKg: raw === '' ? '' : (isNaN(num) ? s.pesoKg : num) }
+      return {
+        ...s,
+        // Unilateral: toda serie lleva lado izquierdo (aunque vacío) para guardarse como D/I
+        ...(unilateral ? { repsIzq: s.repsIzq ?? '' } : {}),
+        pesoKg: raw === '' ? '' : (isNaN(num) ? s.pesoKg : num),
+      }
     })
 
   useEffect(() => {
@@ -774,7 +814,7 @@ function EjercicioCard({
 
   const handleGuardar = () => {
     // 1. Comprobar campos vacíos
-    const vacias = series.filter((s) => s.reps === '' || s.pesoKg === '')
+    const vacias = series.filter((s) => s.reps === '' || s.pesoKg === '' || (unilateral && (s.repsIzq ?? '') === ''))
     if (vacias.length > 0) {
       setVaciosInfo(vacias.map((s) => `Serie ${s.numero}`).join(', '))
       setShowVaciosModal(true)
@@ -854,11 +894,23 @@ function EjercicioCard({
       {/* Tabla de series */}
       <div className="mx-5 rounded-2xl bg-zinc-900 border border-zinc-800 overflow-hidden">
         {/* Cabecera */}
-        <div className="grid grid-cols-[2.5rem_1fr_1fr] gap-px bg-zinc-800">
+        <div className={['grid gap-px bg-zinc-800', unilateral ? 'grid-cols-[2.5rem_1fr_1fr_1fr]' : 'grid-cols-[2.5rem_1fr_1fr]'].join(' ')}>
           <div className="bg-zinc-900 py-2 text-center text-xs font-semibold text-zinc-500">#</div>
-          <div className="bg-zinc-900 py-2 text-center text-xs font-semibold text-zinc-500">Reps</div>
+          {unilateral ? (
+            <>
+              <div className="bg-zinc-900 py-2 text-center text-xs font-semibold text-zinc-500">Reps <span className="text-sky-400">D</span></div>
+              <div className="bg-zinc-900 py-2 text-center text-xs font-semibold text-zinc-500">Reps <span className="text-pink-400">I</span></div>
+            </>
+          ) : (
+            <div className="bg-zinc-900 py-2 text-center text-xs font-semibold text-zinc-500">Reps</div>
+          )}
           <div className="bg-zinc-900 py-2 text-center text-xs font-semibold text-zinc-500">Kg</div>
         </div>
+        {unilateral && (
+          <p className="bg-zinc-900 border-t border-zinc-800 px-3 py-1.5 text-[11px] text-zinc-500">
+            Derecho (D) e izquierdo (I): al escribir uno se copia en el otro; corrígelo si es distinto.
+          </p>
+        )}
 
         {/* Filas */}
         {series.map((serie, i) => {
@@ -872,7 +924,7 @@ function EjercicioCard({
 
           return (
           <div key={i} className="border-t border-zinc-800">
-            <div className="grid grid-cols-[2.5rem_1fr_1fr] gap-px bg-zinc-800">
+            <div className={['grid gap-px bg-zinc-800', unilateral ? 'grid-cols-[2.5rem_1fr_1fr_1fr]' : 'grid-cols-[2.5rem_1fr_1fr]'].join(' ')}>
               <div className="bg-zinc-900 flex items-center justify-center text-sm font-bold text-zinc-500">
                 {serie.numero}
               </div>
@@ -882,12 +934,28 @@ function EjercicioCard({
                   inputMode="numeric"
                   pattern="[0-9]*"
                   value={serie.reps === '' ? '' : String(serie.reps)}
-                  onChange={(e) => updateReps(i, e.target.value)}
+                  onChange={(e) => updateReps(i, e.target.value, 'der')}
                   placeholder="—"
+                  aria-label={unilateral ? `Serie ${serie.numero} reps derecho` : `Serie ${serie.numero} reps`}
                   className="w-full bg-zinc-800 rounded-xl py-3 text-center text-lg font-bold text-white placeholder-zinc-600
                              focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+              {unilateral && (
+                <div className="bg-zinc-900 p-1">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={serie.repsIzq === undefined || serie.repsIzq === '' ? '' : String(serie.repsIzq)}
+                    onChange={(e) => updateReps(i, e.target.value, 'izq')}
+                    placeholder="—"
+                    aria-label={`Serie ${serie.numero} reps izquierdo`}
+                    className="w-full bg-zinc-800 rounded-xl py-3 text-center text-lg font-bold text-white placeholder-zinc-600
+                               focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                </div>
+              )}
               <div className="bg-zinc-900 p-1 relative">
                 <input
                   type="text"
@@ -1247,7 +1315,7 @@ function UltimoEntrenoCard({
                     <span className="text-sm font-bold text-white tabular-nums">{s.pesoKg === '' ? '—' : s.pesoKg}</span>
                     <span className="text-[10px] text-zinc-500">kg</span>
                     <span className="text-[10px] text-zinc-500 mx-px">×</span>
-                    <span className="text-sm text-emerald-400 tabular-nums">{s.reps === '' ? '—' : s.reps}</span>
+                    <span className="text-sm text-emerald-400 tabular-nums">{textoReps(s)}</span>
                     {s.etiqueta && (
                       <div className={`w-1.5 h-1.5 rounded-full ml-0.5 shrink-0 ${ETIQUETA_DOT[s.etiqueta]}`} />
                     )}
@@ -1615,6 +1683,10 @@ function ListaEjerciciosDrawer({
 
   // IDs ya en la sesión (para evitar duplicados en el selector)
   const idsEnSesion = new Set(ejercicios.map((e) => e.ejercicioId))
+  // Candidatos a añadir: los de la rutina que no están ya (los en suspenso no se ofrecen)
+  const disponibles = todosLosEjercicios
+    .filter((e) => !idsEnSesion.has(e.id) && !e.suspendido)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }))
 
   const handleAgregar = (ejId: string) => {
     onAgregar(ejId)
@@ -1706,10 +1778,7 @@ function ListaEjerciciosDrawer({
             <p className="px-5 py-2 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
               Elige un ejercicio
             </p>
-            {todosLosEjercicios
-              .filter((e) => !idsEnSesion.has(e.id))
-              .sort((a, b) => a.nombre.localeCompare(b.nombre))
-              .map((e) => (
+            {disponibles.map((e) => (
                 <button
                   key={e.id}
                   onClick={() => handleAgregar(e.id)}
@@ -1720,7 +1789,7 @@ function ListaEjerciciosDrawer({
                   <span className="text-xs text-zinc-600 ml-auto shrink-0">Día {e.dia}</span>
                 </button>
               ))}
-            {todosLosEjercicios.filter((e) => !idsEnSesion.has(e.id)).length === 0 && (
+            {disponibles.length === 0 && (
               <p className="px-5 py-3 text-sm text-zinc-600">Todos los ejercicios ya están en la sesión.</p>
             )}
           </div>
@@ -1926,7 +1995,7 @@ function generarTextoWhatsApp(
     lines.push(`✅ ${ej.nombreSustituido ?? ej.nombreSnapshot}`)
     const seriesStr = ej.series
       .map((s) => {
-        let str = `S${s.numero}: ${s.pesoKg !== '' ? s.pesoKg + 'kg' : '—'} × ${s.reps !== '' ? s.reps : '—'}`
+        let str = `S${s.numero}: ${s.pesoKg !== '' ? s.pesoKg + 'kg' : '—'} × ${textoReps(s)}${esSerieUnilateral(s) ? ' (D/I)' : ''}`
         if (s.etiqueta === 'fallo') str += ' 🔴Fallo'
         else if (s.etiqueta === 'rir0') str += ' 🟠RIR0'
         else if (s.etiqueta === 'rir1') str += ' 🟡RIR1'
@@ -2388,7 +2457,7 @@ export function ResumenSesion({
                           </span>
                           <span className="text-zinc-600 text-xs">×</span>
                           <span className="text-sm text-zinc-300 tabular-nums">
-                            {s.reps !== '' ? String(s.reps) : '—'}
+                            {textoReps(s)}
                           </span>
                           {s.etiqueta && (
                             <span className={[
