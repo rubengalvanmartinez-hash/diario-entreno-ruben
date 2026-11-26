@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.7.0'
+export const APP_VERSION = '2.7.1'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,16 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.7.1',
+    fecha: '26/11/2026',
+    tipo: 'menor',
+    cambios: [
+      'La web se traslada de Netlify a Cloudflare (gratis, sin límite de tráfico): nueva dirección, misma app y mismos datos (están en Supabase)',
+      'Tras el cambio hay que volver a añadir la app a la pantalla de inicio desde la nueva dirección; las fotos de ejercicios se guardan solo en el dispositivo y hay que subirlas otra vez en Ajustes',
+      'BUG: el icono de la app instalada no aparecía (el manifiesto apuntaba a archivos inexistentes); ahora usa los iconos correctos, también en iPhone',
+    ],
+  },
   {
     version: '2.7.0',
     fecha: '26/09/2026',

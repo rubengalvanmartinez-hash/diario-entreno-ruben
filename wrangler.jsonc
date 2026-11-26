@@ -1,0 +1,12 @@
+// Despliegue en Cloudflare Workers (archivos estáticos, sin código de servidor).
+// Workers Builds: build command `npm run build`, deploy command `npx wrangler deploy`.
+// El "name" debe coincidir con el nombre del Worker en el panel de Cloudflare.
+{
+  "name": "diario-entreno-ruben",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist",
+    // SPA: cualquier ruta sin archivo (p. ej. /historial) sirve index.html
+    "not_found_handling": "single-page-application"
+  }
+}
