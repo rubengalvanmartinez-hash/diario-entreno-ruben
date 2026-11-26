@@ -36,6 +36,16 @@ export interface Ejercicio {
    * En estos ejercicios bajar el volumen es progresar (menos ayuda = más fuerza).
    */
   esAsistencia?: boolean
+  /**
+   * true = "en suspenso": fuera de la rutina (no sale en sesiones ni selectores)
+   * pero conserva id, día de origen, notas e historial para recuperarlo después.
+   */
+  suspendido?: boolean
+  /**
+   * true = cada lado por separado (p. ej. curl martillo, zancadas): las series
+   * llevan repeticiones del lado derecho (reps) y del izquierdo (repsIzq).
+   */
+  unilateral?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +57,10 @@ export type EtiquetaSerie = 'fallo' | 'rir0' | 'rir1'
 export interface Serie {
   /** Número de serie (1-based) */
   numero: number
+  /** Repeticiones. En ejercicios unilaterales: las del lado DERECHO (las que usan las estadísticas) */
   reps: number | ''
+  /** Solo ejercicios unilaterales: repeticiones del lado IZQUIERDO (undefined = serie normal) */
+  repsIzq?: number | ''
   pesoKg: number | ''
   /** Etiqueta de esfuerzo opcional */
   etiqueta?: EtiquetaSerie
@@ -70,6 +83,8 @@ export interface SesionEjercicio {
   ayudaFede?: boolean
   /** true si el usuario saltó este ejercicio sin introducir datos */
   saltado?: boolean
+  /** true si se registra cada lado por separado (copiado de la config al crear la sesión) */
+  unilateral?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -108,20 +123,36 @@ export interface RegistroPeso {
 // ---------------------------------------------------------------------------
 
 /** Genera series vacías a partir del número de series por defecto */
-export function crearSeriesVacias(cantidad: number): Serie[] {
+export function crearSeriesVacias(cantidad: number, unilateral = false): Serie[] {
   return Array.from({ length: cantidad }, (_, i) => ({
     numero: i + 1,
-    reps: '',
-    pesoKg: '',
+    reps: '' as const,
+    ...(unilateral ? { repsIzq: '' as const } : {}),
+    pesoKg: '' as const,
   }))
 }
 
 /**
- * true si la serie tiene algún dato real: reps > 0 o peso > 0.
+ * true si la serie tiene algún dato real: reps > 0 (de cualquier lado) o peso > 0.
  * El peso 0 con reps es válido (ejercicios a peso corporal, ej. Dominadas).
  */
-export function serieConDatos(s: Pick<Serie, 'reps' | 'pesoKg'>): boolean {
-  return (s.reps !== '' && Number(s.reps) > 0) || (s.pesoKg !== '' && Number(s.pesoKg) > 0)
+export function serieConDatos(s: Pick<Serie, 'reps' | 'pesoKg' | 'repsIzq'>): boolean {
+  return (s.reps !== '' && Number(s.reps) > 0)
+    || (s.repsIzq !== undefined && s.repsIzq !== '' && Number(s.repsIzq) > 0)
+    || (s.pesoKg !== '' && Number(s.pesoKg) > 0)
+}
+
+/** true si la serie registra cada lado por separado */
+export function esSerieUnilateral(s: Pick<Serie, 'repsIzq'>): boolean {
+  return s.repsIzq !== undefined
+}
+
+/** Reps para mostrar: "10" o, en unilaterales, "10/9" (derecho/izquierdo; igual → "10/10") */
+export function textoReps(s: Pick<Serie, 'reps' | 'repsIzq'>, vacio = '—'): string {
+  const d = s.reps === '' ? vacio : String(s.reps)
+  if (!esSerieUnilateral(s)) return d
+  const i = s.repsIzq === '' || s.repsIzq === undefined ? vacio : String(s.repsIzq)
+  return `${d}/${i}`
 }
 
 /** Construye un SesionEjercicio inicial a partir de un Ejercicio */
@@ -129,9 +160,10 @@ export function crearSesionEjercicio(ejercicio: Ejercicio): SesionEjercicio {
   return {
     ejercicioId: ejercicio.id,
     nombreSnapshot: ejercicio.nombre,
-    series: crearSeriesVacias(ejercicio.seriesPorDefecto),
+    series: crearSeriesVacias(ejercicio.seriesPorDefecto, !!ejercicio.unilateral),
     notaSesion: '',
     completado: false,
+    ...(ejercicio.unilateral ? { unilateral: true } : {}),
   }
 }
 

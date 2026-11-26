@@ -128,6 +128,10 @@ export interface FitLogActions {
   actualizarEjercicio: (id: string, cambios: Partial<Omit<Ejercicio, 'id'>>) => void
   eliminarEjercicio: (id: string) => void
   moverEjercicio: (id: string, nuevoDia: DiaId) => void
+  /** Saca el ejercicio de la rutina sin borrarlo (conserva día, notas e historial) */
+  suspenderEjercicio: (id: string) => void
+  /** Devuelve un ejercicio en suspenso a la rutina, al final del día indicado (por defecto, el suyo) */
+  recuperarEjercicio: (id: string, dia?: DiaId) => void
   reordenarEjercicios: (dia: DiaId, ordenIds: string[]) => void
   setSeriesGlobalesPorDefecto: (n: 3 | 4) => void
 
@@ -293,7 +297,7 @@ export const useFitLogStore = create<FitLogStore>()(
       iniciarSesion(dia) {
         const { ejercicios } = get()
         const ejerciciosDia = ejercicios
-          .filter((e) => e.dia === dia)
+          .filter((e) => e.dia === dia && !e.suspendido)
           .sort((a, b) => a.orden - b.orden)
 
         const sesionEjercicios: SesionEjercicio[] = ejerciciosDia.map(crearSesionEjercicio)
@@ -504,7 +508,8 @@ export const useFitLogStore = create<FitLogStore>()(
           if (!s.sesionActiva) return s
           const ejercicios = [...s.sesionActiva.ejercicios]
           const series = [...ejercicios[ejercicioIndice].series]
-          series.push({ numero: series.length + 1, reps: '', pesoKg: '' })
+          const unilateral = ejercicios[ejercicioIndice].unilateral
+          series.push({ numero: series.length + 1, reps: '', ...(unilateral ? { repsIzq: '' as const } : {}), pesoKg: '' })
           ejercicios[ejercicioIndice] = { ...ejercicios[ejercicioIndice], series }
           return { sesionActiva: { ...s.sesionActiva, ejercicios } }
         })
@@ -576,7 +581,7 @@ export const useFitLogStore = create<FitLogStore>()(
         const { ejercicios } = get()
         const ordenMax = Math.max(
           -1,
-          ...ejercicios.filter((e) => e.dia === datos.dia).map((e) => e.orden),
+          ...ejercicios.filter((e) => e.dia === datos.dia && !e.suspendido).map((e) => e.orden),
         )
         const nuevo: Ejercicio = { id: nanoid(), orden: ordenMax + 1, ...datos }
         set((s) => ({ ejercicios: [...s.ejercicios, nuevo] }))
@@ -598,11 +603,34 @@ export const useFitLogStore = create<FitLogStore>()(
         set((s) => {
           const ordenMax = Math.max(
             -1,
-            ...s.ejercicios.filter((e) => e.dia === nuevoDia).map((e) => e.orden),
+            ...s.ejercicios.filter((e) => e.dia === nuevoDia && !e.suspendido).map((e) => e.orden),
           )
           return {
             ejercicios: s.ejercicios.map((e) =>
               e.id === id ? { ...e, dia: nuevoDia, orden: ordenMax + 1 } : e,
+            ),
+          }
+        })
+      },
+
+      suspenderEjercicio(id) {
+        set((s) => ({
+          ejercicios: s.ejercicios.map((e) => (e.id === id ? { ...e, suspendido: true } : e)),
+        }))
+      },
+
+      recuperarEjercicio(id, dia) {
+        set((s) => {
+          const ej = s.ejercicios.find((e) => e.id === id)
+          if (!ej) return s
+          const diaDestino = dia ?? ej.dia
+          const ordenMax = Math.max(
+            -1,
+            ...s.ejercicios.filter((e) => e.dia === diaDestino && !e.suspendido).map((e) => e.orden),
+          )
+          return {
+            ejercicios: s.ejercicios.map((e) =>
+              e.id === id ? { ...e, suspendido: false, dia: diaDestino, orden: ordenMax + 1 } : e,
             ),
           }
         })
@@ -680,7 +708,21 @@ export const useFitLogStore = create<FitLogStore>()(
       },
 
       importarEjercicios(ejercicios) {
-        set({ ejercicios })
+        // Si Supabase aún no tiene las columnas suspendido/unilateral (llegan como
+        // undefined), conservar el valor local de ese ejercicio en vez de perderlo
+        set((s) => {
+          const locales = new Map(s.ejercicios.map((e) => [e.id, e]))
+          return {
+            ejercicios: ejercicios.map((e) => {
+              const local = locales.get(e.id)
+              return {
+                ...e,
+                suspendido: e.suspendido ?? local?.suspendido,
+                unilateral: e.unilateral ?? local?.unilateral,
+              }
+            }),
+          }
+        })
       },
 
       actualizarHistorialRemoto(sesiones) {
@@ -796,9 +838,10 @@ export const useFitLogStore = create<FitLogStore>()(
 // Selectores derivados (evitan recalcular en cada componente)
 // ---------------------------------------------------------------------------
 
+/** Ejercicios ACTIVOS de un día (sin los que están en suspenso), en orden */
 export const selectEjerciciosPorDia = (dia: DiaId) => (s: FitLogStore) =>
   s.ejercicios
-    .filter((e) => e.dia === dia)
+    .filter((e) => e.dia === dia && !e.suspendido)
     .sort((a, b) => a.orden - b.orden)
 
 export const selectEjercicioActivoActual = (s: FitLogStore): SesionEjercicio | null =>

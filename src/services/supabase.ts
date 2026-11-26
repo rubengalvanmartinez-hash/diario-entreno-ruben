@@ -14,7 +14,7 @@ import type {
   PerfilCorporal,
   CategoriaImc,
 } from '../types/models'
-import { serieConDatos } from '../types/models'
+import { serieConDatos, esSerieUnilateral } from '../types/models'
 import { DEFAULT_EJERCICIOS, esConfigPorDefecto } from '../store/defaultData'
 import { useFitLogStore } from '../store/useFitLogStore'
 
@@ -310,24 +310,112 @@ export async function eliminarUsuario(id: string): Promise<void> {
  * Sincroniza la sesión completa al terminar.
  * Idempotente: elimina filas previas del sesion_id antes de insertar.
  */
+// Columnas detectadas como inexistentes en esta sesión de la app (para avisar en Ajustes)
+const columnasPendientes = new Set<string>()
+function marcarColumnaPendiente(c: string): void { columnasPendientes.add(c) }
+
 /**
- * INSERT en entrenos con tolerancia a que la columna gimnasio aún no exista
- * (hasta que el admin ejecute el SQL de v2.5.0): reintenta sin ella.
+ * INSERT tolerante a columnas opcionales que aún no existan en la tabla (hasta
+ * que el admin ejecute el SQL de la versión correspondiente: gimnasio → v2.5.0,
+ * reps_izq / suspendido / unilateral → v2.8.0). Si PostgREST responde que falta
+ * una columna (PGRST204), la quita de todas las filas y reintenta. Así un
+ * delete+insert nunca deja la tabla vacía por culpa de una columna nueva.
  */
-async function insertarEntrenos(rows: Record<string, unknown>[], origen: string): Promise<void> {
-  const { error } = await supabase.from('entrenos').insert(rows)
-  if (!error) return
-  const msg = String(error.message ?? '')
-  if (error.code === 'PGRST204' || /gimnasio/i.test(msg)) {
-    console.warn(`[Supabase] ${origen}: la columna gimnasio no existe aún — reintentando sin ella (pendiente ejecutar el SQL de v2.5.0)`)
-    const sinGimnasio = rows.map((r) => { const copia = { ...r }; delete copia.gimnasio; return copia })
-    const { error: error2 } = await supabase.from('entrenos').insert(sinGimnasio)
-    if (!error2) return
-    console.error(`[Supabase] ${origen} INSERT:`, error2)
-    throw error2
+async function insertarTolerante(
+  tabla: string,
+  rows: Record<string, unknown>[],
+  opcionales: string[],
+  origen: string,
+): Promise<void> {
+  let actuales = rows
+  const pendientes = opcionales.filter((c) => rows.some((r) => c in r))
+  for (let intento = 0; intento <= pendientes.length; intento++) {
+    const { error } = await supabase.from(tabla).insert(actuales)
+    if (!error) return
+    const msg = String(error.message ?? '')
+    const faltaColumna = error.code === 'PGRST204' || error.code === '42703' || /could not find .*column/i.test(msg)
+    const restantes = pendientes.filter((c) => actuales.some((r) => c in r))
+    if (!faltaColumna || restantes.length === 0) {
+      console.error(`[Supabase] ${origen} INSERT ${tabla}:`, error)
+      throw error
+    }
+    // La columna que falta viene en el mensaje: "Could not find the 'x' column of 'tabla'…"
+    const nombrada = restantes.find((c) => msg.includes(`'${c}'`))
+    const quitar = nombrada ? [nombrada] : restantes
+    quitar.forEach(marcarColumnaPendiente)
+    console.warn(`[Supabase] ${origen}: falta(n) la(s) columna(s) ${quitar.join(', ')} en ${tabla} — se guarda sin ella(s). Ejecuta el SQL de la última versión en Supabase.`)
+    actuales = actuales.map((r) => {
+      const copia = { ...r }
+      for (const c of quitar) delete copia[c]
+      return copia
+    })
   }
-  console.error(`[Supabase] ${origen} INSERT:`, error)
-  throw error
+}
+
+/**
+ * Comprueba si existen las columnas que necesita la v2.8.0 (reps por lado y
+ * ejercicios en suspenso / unilaterales). Devuelve las que faltan.
+ */
+export async function comprobarColumnasV280(): Promise<string[]> {
+  const faltan: string[] = []
+  const probar = async (tabla: string, columnas: string[]) => {
+    const { error } = await supabase.from(tabla).select(columnas.join(',')).limit(1)
+    if (!error) return
+    // 42703 = columna inexistente; si el error es otro (red…), no concluir nada
+    if (error.code === '42703' || /column/i.test(String(error.message))) {
+      for (const c of columnas) {
+        const { error: e } = await supabase.from(tabla).select(c).limit(1)
+        if (e) faltan.push(c)
+      }
+    }
+  }
+  await Promise.all([
+    probar('entrenos', ['reps_izq']),
+    probar('ejercicios_usuario', ['suspendido', 'unilateral']),
+  ])
+  columnasPendientes.forEach((c) => { if (!faltan.includes(c)) faltan.push(c) })
+  return faltan
+}
+
+const COLUMNAS_OPCIONALES_ENTRENOS = ['gimnasio', 'reps_izq']
+
+async function insertarEntrenos(rows: Record<string, unknown>[], origen: string): Promise<void> {
+  await insertarTolerante('entrenos', rows, COLUMNAS_OPCIONALES_ENTRENOS, origen)
+}
+
+/**
+ * Filas de `entrenos` de un ejercicio. `reps` = lado derecho en unilaterales;
+ * `reps_izq` solo se envía si algún ejercicio del lote es unilateral (PostgREST
+ * exige las mismas claves en todas las filas de un INSERT múltiple).
+ */
+function filasEntreno(
+  usuarioId: string,
+  sesion: Pick<Sesion, 'id' | 'fecha' | 'dia' | 'gimnasio'>,
+  ej: SesionEjercicio,
+): Record<string, unknown>[] {
+  return ej.series.map((serie) => ({
+    usuario_id: usuarioId,
+    sesion_id: sesion.id,
+    fecha: sesion.fecha,
+    dia: String(sesion.dia),
+    ejercicio: ej.nombreSustituido ?? ej.nombreSnapshot,
+    serie: serie.numero,
+    reps: serie.reps !== '' ? serie.reps : null,
+    peso_kg: serie.pesoKg !== '' ? serie.pesoKg : null,
+    etiqueta: serie.etiqueta ?? null,
+    nota: ej.notaSesion || null,
+    ayuda_fede: ej.ayudaFede ?? false,
+    gimnasio: sesion.gimnasio ?? null,
+    ...(esSerieUnilateral(serie)
+      ? { reps_izq: serie.repsIzq !== '' && serie.repsIzq !== undefined ? serie.repsIzq : null }
+      : {}),
+  }))
+}
+
+/** Iguala las claves de todas las filas (reps_izq = null donde no aplica) */
+function igualarClaves(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  if (!rows.some((r) => 'reps_izq' in r)) return rows
+  return rows.map((r) => ('reps_izq' in r ? r : { ...r, reps_izq: null }))
 }
 
 export async function sincronizarEntrenoSupabase(
@@ -347,24 +435,9 @@ export async function sincronizarEntrenoSupabase(
 
   // No subir ejercicios saltados ni guardados sin ningún dato real (series vacías):
   // generaban filas con reps/peso null que ensuciaban el "último entreno"
-  const rows = sesion.ejercicios
+  const rows = igualarClaves(sesion.ejercicios
     .filter((ej) => ej.completado && !ej.saltado && ej.series.some(serieConDatos))
-    .flatMap((ej) =>
-    ej.series.map((serie) => ({
-      usuario_id: usuarioId,
-      sesion_id: sesion.id,
-      fecha: sesion.fecha,
-      dia: String(sesion.dia),
-      ejercicio: ej.nombreSustituido ?? ej.nombreSnapshot,
-      serie: serie.numero,
-      reps: serie.reps !== '' ? serie.reps : null,
-      peso_kg: serie.pesoKg !== '' ? serie.pesoKg : null,
-      etiqueta: serie.etiqueta ?? null,
-      nota: ej.notaSesion || null,
-      ayuda_fede: ej.ayudaFede ?? false,
-      gimnasio: sesion.gimnasio ?? null,
-    })),
-  )
+    .flatMap((ej) => filasEntreno(usuarioId, sesion, ej)))
   if (rows.length === 0) return
   await insertarEntrenos(rows, 'sincronizarEntrenoSupabase')
 }
@@ -390,20 +463,7 @@ export async function sincronizarEjercicioSupabase(
   // No subir el ejercicio si está saltado o no tiene ningún dato real
   // (el DELETE previo ya limpia filas antiguas de este ejercicio en la sesión)
   const sinDatos = ejercicio.saltado || !ejercicio.series.some(serieConDatos)
-  const rows = sinDatos ? [] : ejercicio.series.map((serie) => ({
-    usuario_id: usuarioId,
-    sesion_id: sesion.id,
-    fecha: sesion.fecha,
-    dia: String(sesion.dia),
-    ejercicio: nombreEj,
-    serie: serie.numero,
-    reps: serie.reps !== '' ? serie.reps : null,
-    peso_kg: serie.pesoKg !== '' ? serie.pesoKg : null,
-    etiqueta: serie.etiqueta ?? null,
-    nota: ejercicio.notaSesion || null,
-    ayuda_fede: ejercicio.ayudaFede ?? false,
-    gimnasio: sesion.gimnasio ?? null,
-  }))
+  const rows = sinDatos ? [] : igualarClaves(filasEntreno(usuarioId, sesion, ejercicio))
   if (rows.length === 0) return
   await insertarEntrenos(rows, 'sincronizarEjercicioSupabase')
 }
@@ -487,6 +547,8 @@ export async function cargarDatosUsuario(usuarioId: string): Promise<DatosUsuari
         .map((r) => ({
           numero: r.serie as number,
           reps: r.reps !== null ? (r.reps as number) : ('' as const),
+          // Unilateral: reps = derecho, reps_izq = izquierdo (null/ausente = serie normal)
+          ...(r.reps_izq != null ? { repsIzq: r.reps_izq as number } : {}),
           pesoKg: r.peso_kg !== null ? (r.peso_kg as number) : ('' as const),
           ...(r.etiqueta ? { etiqueta: r.etiqueta as EtiquetaSerie } : {}),
         }))
@@ -548,6 +610,10 @@ export async function obtenerEjerciciosUsuario(usuarioId: string): Promise<Ejerc
     orden: r.orden as number,
     seriesPorDefecto: ((r.series_por_defecto ?? 3) as 3 | 4),
     notasFijas: (r.notas_fijas ?? '') as string,
+    // undefined = la columna no existe aún (SQL v2.8.0 sin ejecutar): el store
+    // conserva entonces el valor local en vez de perderlo
+    suspendido: 'suspendido' in r ? !!r.suspendido : undefined,
+    unilateral: 'unilateral' in r ? !!r.unilateral : undefined,
   }))
 }
 
@@ -567,6 +633,11 @@ export async function sincronizarEjerciciosUsuario(
 
   if (ejercicios.length === 0) return
 
+  // suspendido / unilateral solo se envían si algún ejercicio los usa: si no,
+  // el valor por defecto de la columna (false) ya es correcto y se evita un
+  // INSERT fallido mientras no exista la columna
+  const conSuspendido = ejercicios.some((e) => e.suspendido)
+  const conUnilateral = ejercicios.some((e) => e.unilateral)
   const rows = ejercicios.map((e) => ({
     id: e.id,
     usuario_id: usuarioId,
@@ -575,9 +646,10 @@ export async function sincronizarEjerciciosUsuario(
     orden: e.orden,
     series_por_defecto: e.seriesPorDefecto,
     notas_fijas: e.notasFijas || '',
+    ...(conSuspendido ? { suspendido: !!e.suspendido } : {}),
+    ...(conUnilateral ? { unilateral: !!e.unilateral } : {}),
   }))
-  const { error: errIns } = await supabase.from('ejercicios_usuario').insert(rows)
-  if (errIns) throw errIns
+  await insertarTolerante('ejercicios_usuario', rows, ['suspendido', 'unilateral'], 'sincronizarEjerciciosUsuario')
 }
 
 /**

@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.7.1'
+export const APP_VERSION = '2.8.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,20 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.8.0',
+    fecha: '26/11/2026',
+    tipo: 'media',
+    cambios: [
+      'TENDENCIAS: el calendario de los últimos 60 días pinta cada entreno con el color de su día: Día 1 azul, Día 2 verde, Día 3 amarillo (parcial / extra en morado). Si un día hubo varias sesiones, la casilla sale partida en franjas. Leyenda nueva',
+      'TENDENCIAS: Personal Records en orden alfabético; en Progresión, alfabético dentro de cada estado (los que van peor siguen primero)',
+      'NUEVO modo "En suspenso": botón «Suspender» en cada ejercicio (Ajustes) para sacarlo de la rutina SIN borrarlo; no sale en sesiones ni al añadir ejercicios, pero conserva su día, notas, foto e historial (sigue en Tendencias). Se recupera desde la sección «En suspenso», en su día o en otro',
+      'NUEVO «Ordenar ejercicios» en cada día de Ajustes: lista compacta con flechas grandes para cambiar el orden rápido; las sesiones siguen ese orden',
+      'NUEVO «Cada lado por separado» (Ajustes, por ejercicio): en la sesión salen dos columnas de reps, derecho (D) e izquierdo (I). Al escribir en una se copia en la otra y solo hay que corregirla si es distinta. Se ve como 10/9 en el último entreno, el resumen y WhatsApp; las estadísticas usan el lado derecho',
+      'Base de datos: SQL supabase_v2.8.0.sql (columnas reps_izq, suspendido, unilateral). Sin ejecutarlo la app funciona, pero eso solo se guarda en el móvil; el admin ve un aviso en Ajustes',
+      'SEGURIDAD DE DATOS: guardar la configuración de ejercicios ya no puede dejarla vacía en Supabase si falta una columna (antes se borraba y luego fallaba la inserción): ahora reintenta sin la columna que falte',
+    ],
+  },
   {
     version: '2.7.1',
     fecha: '26/11/2026',

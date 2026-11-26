@@ -29,7 +29,7 @@ import type { Sesion, SesionEjercicio, Serie, EtiquetaSerie } from '../types/mod
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
 export type OpSesion =
-  | { t: 'serie';    i: number; s: number; campo: 'reps' | 'pesoKg'; valor: number | '' }
+  | { t: 'serie';    i: number; s: number; campo: 'reps' | 'repsIzq' | 'pesoKg'; valor: number | '' }
   | { t: 'etiqueta'; i: number; s: number; valor: EtiquetaSerie | null }
   | { t: 'nota';     i: number; valor: string }
   | { t: 'fede';     i: number; valor: boolean }
@@ -303,9 +303,11 @@ function fusionarCampos(local: Sesion, remota: Sesion): Sesion {
         const sr = er.series[i]
         if (!sl) return sr
         if (!sr) return sl
+        const repsIzq = sl.repsIzq !== undefined && sl.repsIzq !== '' ? sl.repsIzq : sr.repsIzq
         return {
           numero:   sl.numero,
           reps:     sl.reps   !== '' ? sl.reps   : sr.reps,
+          ...(repsIzq !== undefined ? { repsIzq } : {}),
           pesoKg:   sl.pesoKg !== '' ? sl.pesoKg : sr.pesoKg,
           ...((sl.etiqueta ?? sr.etiqueta) ? { etiqueta: sl.etiqueta ?? sr.etiqueta } : {}),
         }
