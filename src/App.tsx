@@ -1,4 +1,5 @@
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { createBrowserRouter, RouterProvider, Navigate, useNavigate } from 'react-router-dom'
 import Layout              from './components/layout/Layout'
 import HomePage            from './pages/HomePage'
 import RutinaPage          from './pages/RutinaPage'
@@ -12,7 +13,7 @@ import HistorialPage         from './pages/HistorialPage'
 import LoginPage           from './pages/LoginPage'
 import AdminUsuariosPage   from './pages/AdminUsuariosPage'
 import DebugSupabasePage   from './pages/DebugSupabasePage'
-import { getUsuarioActivo, RUBEN_UUID } from './services/supabase'
+import { getUsuarioActivo, RUBEN_UUID, estadoSesionAuth, olvidarUsuarioActivo, supabase } from './services/supabase'
 
 // ---------------------------------------------------------------------------
 // CORRECCIÓN UUID RUBÉN — corre antes de cualquier hidratación del store.
@@ -68,7 +69,28 @@ import { getUsuarioActivo, RUBEN_UUID } from './services/supabase'
 // ---------------------------------------------------------------------------
 
 function ProtectedLayout() {
-  const usuario = getUsuarioActivo()
+  const usuario  = getUsuarioActivo()
+  const navigate = useNavigate()
+
+  // Sin sesión de Supabase Auth, RLS no devuelve datos: volver al login.
+  // No bloquea el render (la app es offline-first) y NO echa al usuario si
+  // la sesión no se puede confirmar por falta de red.
+  useEffect(() => {
+    if (!usuario) return
+    let activo = true
+    const salir = () => {
+      if (!activo) return
+      olvidarUsuarioActivo()
+      navigate('/login', { replace: true })
+    }
+    estadoSesionAuth().then((e) => { if (e === 'no') salir() })
+    // Sesión revocada o caducada sin remedio (p. ej. un admin restableció el acceso)
+    const { data } = supabase.auth.onAuthStateChange((evento) => {
+      if (evento === 'SIGNED_OUT') salir()
+    })
+    return () => { activo = false; data.subscription.unsubscribe() }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!usuario) return <Navigate to="/login" replace />
   return <Layout />
 }
