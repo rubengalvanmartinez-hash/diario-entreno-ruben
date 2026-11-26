@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, Plus, Trash2, X, Check, Users, Shield, Scale, KeyRound } from 'lucide-react'
+import { ChevronLeft, Plus, Trash2, X, Check, Users, Shield, Scale, KeyRound, Copy } from 'lucide-react'
 import {
   obtenerUsuarios,
   crearUsuario,
@@ -9,7 +9,9 @@ import {
   restablecerPassword,
   getUsuarioActivo,
   crearEjerciciosDesdeTemplate,
+  RUBEN_UUID,
   type UsuarioSupabase,
+  type EstadoAcceso,
 } from '../services/supabase'
 
 // ---------------------------------------------------------------------------
@@ -29,6 +31,18 @@ function colorAvatar(nombre: string): string {
   let hash = 0
   for (let i = 0; i < nombre.length; i++) hash = nombre.charCodeAt(i) + ((hash << 5) - hash)
   return COLORES_AVATAR[Math.abs(hash) % COLORES_AVATAR.length]
+}
+
+const TEXTO_ESTADO: Record<EstadoAcceso, { texto: string; color: string }> = {
+  activo:    { texto: 'Contraseña establecida',                                   color: 'text-zinc-600' },
+  migrar:    { texto: 'Pendiente de cambiar su contraseña antigua al entrar',     color: 'text-amber-500' },
+  pendiente: { texto: 'Sin contraseña: necesita un código de acceso para entrar', color: 'text-amber-500' },
+}
+
+/** Mensaje del servidor (RPC) si lo hay; si no, el genérico. */
+function mensajeServidor(err: unknown, porDefecto: string): string {
+  const m = (err as { message?: string })?.message
+  return m && !/fetch|network/i.test(m) ? m : porDefecto
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +76,13 @@ export default function AdminUsuariosPage() {
   // Restablecer contraseña (confirmación en dos toques)
   const [reseteandoId, setReseteandoId] = useState<string | null>(null)
   const [reseteando,   setReseteando]   = useState(false)
-  const [mensaje,      setMensaje]      = useState('')
+
+  // Código de acceso recién generado (alta o restablecimiento): solo se muestra una vez
+  const [codigoMostrado, setCodigoMostrado] = useState<{ nombre: string; codigo: string } | null>(null)
+  const [copiado,        setCopiado]        = useState(false)
+
+  // UUID propio en Supabase (Rubén usa id local 'ruben')
+  const idPropio = usuarioActual?.esRuben ? RUBEN_UUID : usuarioActual?.id
 
   useEffect(() => { cargarUsuarios() }, [])
 
@@ -87,9 +107,11 @@ export default function AdminUsuariosPage() {
       crearEjerciciosDesdeTemplate(nuevo.id).catch(console.error)
       setModalCrear(false)
       setNombre('')
+      setCopiado(false)
+      setCodigoMostrado({ nombre: nuevo.nombre, codigo: nuevo.codigo })
       await cargarUsuarios()
-    } catch {
-      setErrorForm('Error al crear el usuario. Inténtalo de nuevo.')
+    } catch (err) {
+      setErrorForm(mensajeServidor(err, 'Error al crear el usuario. Inténtalo de nuevo.'))
     } finally {
       setGuardando(false)
     }
@@ -112,12 +134,13 @@ export default function AdminUsuariosPage() {
     if (reseteandoId !== u.id) { setReseteandoId(u.id); return }
     setReseteando(true)
     try {
-      await restablecerPassword(u.id)
+      const codigo = await restablecerPassword(u.id)
       setReseteandoId(null)
-      setMensaje(`Contraseña de ${u.nombre} restablecida: en su próximo acceso creará una nueva.`)
+      setCopiado(false)
+      setCodigoMostrado({ nombre: u.nombre, codigo })
       await cargarUsuarios()
-    } catch {
-      setError('No se pudo restablecer la contraseña.')
+    } catch (err) {
+      setError(mensajeServidor(err, 'No se pudo restablecer la contraseña.'))
     } finally {
       setReseteando(false)
     }
@@ -129,9 +152,17 @@ export default function AdminUsuariosPage() {
       await eliminarUsuario(id)
       setBorrandoId(null)
       await cargarUsuarios()
-    } catch {
-      setError('No se pudo eliminar el usuario.')
+    } catch (err) {
+      setError(mensajeServidor(err, 'No se pudo eliminar el usuario.'))
     }
+  }
+
+  const copiarCodigo = async () => {
+    if (!codigoMostrado) return
+    try {
+      await navigator.clipboard.writeText(codigoMostrado.codigo)
+      setCopiado(true)
+    } catch { /* sin permiso de portapapeles: el código sigue en pantalla */ }
   }
 
   return (
@@ -165,11 +196,30 @@ export default function AdminUsuariosPage() {
         {error && (
           <div className="bg-red-900/20 border border-red-800/40 rounded-2xl px-5 py-4 text-red-400 text-sm mb-4">{error}</div>
         )}
-        {mensaje && (
-          <div className="bg-emerald-900/20 border border-emerald-800/40 rounded-2xl px-5 py-3 text-emerald-400 text-sm mb-4 flex items-start gap-2">
-            <Check size={16} className="shrink-0 mt-0.5" />
-            <span className="flex-1">{mensaje}</span>
-            <button onClick={() => setMensaje('')} className="text-emerald-600 active:text-emerald-300" aria-label="Cerrar aviso"><X size={14} /></button>
+        {codigoMostrado && (
+          <div className="bg-emerald-900/20 border border-emerald-800/40 rounded-2xl px-5 py-4 mb-4 flex flex-col gap-3">
+            <div className="flex items-start gap-2 text-emerald-400 text-sm">
+              <Check size={16} className="shrink-0 mt-0.5" />
+              <span className="flex-1">
+                Código de acceso de <strong className="text-emerald-300">{codigoMostrado.nombre}</strong>
+              </span>
+              <button onClick={() => setCodigoMostrado(null)} className="text-emerald-600 active:text-emerald-300" aria-label="Cerrar aviso"><X size={14} /></button>
+            </div>
+            <div className="flex items-center justify-between gap-3 bg-zinc-950/60 rounded-xl px-4 py-3">
+              <span className="font-mono text-2xl font-black tracking-[0.2em] text-white select-all">{codigoMostrado.codigo}</span>
+              <button
+                onClick={copiarCodigo}
+                className="flex items-center gap-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/15 px-3 py-2 rounded-xl active:bg-emerald-500/25"
+              >
+                <Copy size={13} />
+                {copiado ? 'Copiado' : 'Copiar'}
+              </button>
+            </div>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Pásaselo en persona o por mensaje. Al entrar, elegirá su usuario, escribirá este código y creará su contraseña.
+              Sirve una sola vez, caduca en 7 días y <strong className="text-zinc-300">no se volverá a mostrar</strong>
+              (si se pierde, pulsa Restablecer otra vez).
+            </p>
           </div>
         )}
         {!cargando && !error && usuarios.length === 0 && (
@@ -200,17 +250,21 @@ export default function AdminUsuariosPage() {
                         <span className="text-[10px] font-bold bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded-full">Peso</span>
                       )}
                     </div>
-                    <p className={['text-xs mt-0.5', u.tiene_password ? 'text-zinc-600' : 'text-amber-500'].join(' ')}>
-                      {u.tiene_password ? 'Contraseña establecida' : 'Sin contraseña: la creará en su próximo acceso'}
-                    </p>
+                    {u.estado_acceso && (
+                      <p className={['text-xs mt-0.5', TEXTO_ESTADO[u.estado_acceso].color].join(' ')}>
+                        {TEXTO_ESTADO[u.estado_acceso].texto}
+                      </p>
+                    )}
                   </div>
-                  <button
-                    onClick={() => handleEliminar(u.id)}
-                    className={['size-9 flex items-center justify-center rounded-xl transition-colors', borrandoId === u.id ? 'bg-red-700 text-white' : 'bg-zinc-800 text-zinc-500 active:bg-zinc-700'].join(' ')}
-                    title={borrandoId === u.id ? 'Pulsa de nuevo para confirmar' : 'Eliminar'}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {u.id !== idPropio && (
+                    <button
+                      onClick={() => handleEliminar(u.id)}
+                      className={['size-9 flex items-center justify-center rounded-xl transition-colors', borrandoId === u.id ? 'bg-red-700 text-white' : 'bg-zinc-800 text-zinc-500 active:bg-zinc-700'].join(' ')}
+                      title={borrandoId === u.id ? 'Pulsa de nuevo para confirmar (borra también todos sus datos)' : 'Eliminar'}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </div>
 
                 {/* Toggles */}
@@ -231,13 +285,17 @@ export default function AdminUsuariosPage() {
                   />
                 </div>
 
-                {/* Restablecer contraseña */}
-                {u.tiene_password && (
+                {/* Restablecer contraseña / generar código de acceso */}
+                {u.id !== idPropio && (
                   <div className="border-t border-zinc-800 pt-3 flex items-center justify-between gap-3">
                     <p className="text-xs text-zinc-500 leading-snug">
                       {reseteandoId === u.id
-                        ? `¿Seguro? ${u.nombre} tendrá que crear una contraseña nueva al entrar.`
-                        : '¿Ha olvidado la contraseña? Restablécela aquí.'}
+                        ? (u.estado_acceso === 'pendiente'
+                            ? `¿Generar un código nuevo para ${u.nombre}? El anterior dejará de valer.`
+                            : `¿Seguro? Se cerrarán sus sesiones y ${u.nombre} tendrá que crear una contraseña nueva con el código.`)
+                        : (u.estado_acceso === 'pendiente'
+                            ? 'Genera el código con el que creará su contraseña.'
+                            : '¿Ha olvidado la contraseña? Restablécela aquí.')}
                     </p>
                     <div className="flex items-center gap-2 shrink-0">
                       {reseteandoId === u.id && (
@@ -259,7 +317,11 @@ export default function AdminUsuariosPage() {
                         ].join(' ')}
                       >
                         <KeyRound size={13} />
-                        {reseteando && reseteandoId === u.id ? '…' : reseteandoId === u.id ? 'Sí, restablecer' : 'Restablecer'}
+                        {reseteando && reseteandoId === u.id
+                          ? '…'
+                          : reseteandoId === u.id
+                            ? (u.estado_acceso === 'pendiente' ? 'Sí, generar' : 'Sí, restablecer')
+                            : (u.estado_acceso === 'pendiente' ? 'Generar código' : 'Restablecer')}
                       </button>
                     </div>
                   </div>
@@ -302,7 +364,7 @@ export default function AdminUsuariosPage() {
                 className="w-full bg-zinc-800 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-red-700"
               />
               <p className="text-xs text-zinc-600 mt-1.5">
-                La contraseña la creará el usuario en su primer acceso.
+                Al crearlo verás un código de acceso: pásaselo y con él creará su contraseña en su primer acceso.
               </p>
             </div>
 

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useShallow } from 'zustand/shallow'
 import { useFitLogStore } from '../store/useFitLogStore'
-import { getUsuarioActivo, cerrarSesionLocal, sincronizarEjerciciosUsuario, supabase, forzarSincronizacionPendientes, getRubenUUID, cargarDatosUsuario, asegurarUsuarioRuben, setEquivalenciaSync } from '../services/supabase'
+import { getUsuarioActivo, cerrarSesionLocal, sincronizarEjerciciosUsuario, supabase, forzarSincronizacionPendientes, getRubenUUID, cargarDatosUsuario, setEquivalenciaSync, getIdActivo } from '../services/supabase'
 import {
   iniciarSesionGoogle,
   cerrarSesionGoogle,
@@ -2206,10 +2206,13 @@ function SeccionVerificarSupabase() {
         lineas.push(`✅ SELECT usuarios OK — ${usuarios?.length ?? 0} usuarios: ${nombres || '(ninguno)'}`)
       }
 
-      // 2. INSERT en entrenos — test RLS escritura
+      // 2. INSERT en entrenos — test RLS escritura (con el usuario activo: RLS
+      //    rechaza filas a nombre de otro usuario)
+      const uid = getIdActivo()
+      if (!uid) throw new Error('No hay usuario activo')
       const testId = crypto.randomUUID()
       const { error: errIns } = await supabase.from('entrenos').insert({
-        usuario_id: testId,
+        usuario_id: uid,
         sesion_id: testId,
         fecha: '1970-01-01',
         dia: 'extra',
@@ -2413,9 +2416,7 @@ function SeccionSubidaRuben() {
     try {
       const uuid = getRubenUUID()
 
-      // 1. Garantizar que Rubén existe en la tabla usuarios
-      setProgresoMsg('Verificando usuario en Supabase…')
-      await asegurarUsuarioRuben(uuid)
+      // 1. (La fila de Rubén en `usuarios` existe siempre: sin ella no podría haber iniciado sesión)
 
       // 2. Borrar datos previos de Rubén
       setProgresoMsg('Borrando datos anteriores…')

@@ -1,4 +1,4 @@
-export const APP_VERSION = '2.7.0'
+export const APP_VERSION = '2.8.0'
 
 export type TipoCambio = 'mayor' | 'media' | 'menor'
 
@@ -10,6 +10,20 @@ export interface EntradaChangelog {
 }
 
 export const CHANGELOG: EntradaChangelog[] = [
+  {
+    version: '2.8.0',
+    fecha: '26/11/2026',
+    tipo: 'mayor',
+    cambios: [
+      'SEGURIDAD: con la clave pública de la app, cualquiera podía leer sin iniciar sesión todos los usuarios (incluidos email y hash de contraseña), entrenos y pesos, y borrar la contraseña de cualquier cuenta',
+      'El login pasa a Supabase Auth: contraseñas con bcrypt en el servidor, nunca en el navegador; cada petición va con la sesión del usuario',
+      'Row Level Security en las 9 tablas: cada usuario solo ve y modifica sus datos; un administrador ve los de todos ("Ver perfil de…" sigue funcionando). Sin sesión la API no devuelve nada',
+      'Primer acceso tras actualizar: escribe tu contraseña de siempre y elige una nueva (mínimo 8 caracteres); la antigua estuvo expuesta y deja de valer',
+      'Usuarios nuevos y contraseñas olvidadas: el admin genera un código de un solo uso (válido 7 días) en Usuarios → Restablecer, y con él se crea la contraseña. Ya no se puede "reclamar" una cuenta sin contraseña',
+      'Restablecer el acceso cierra también las sesiones abiertas de ese usuario; eliminar un usuario borra sus datos y su cuenta',
+      'Requiere ejecutar supabase_v2.8.0.sql en el SQL Editor de Supabase',
+    ],
+  },
   {
     version: '2.7.0',
     fecha: '26/09/2026',

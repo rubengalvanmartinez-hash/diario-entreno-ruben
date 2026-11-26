@@ -25,7 +25,24 @@ import { useFitLogStore } from '../store/useFitLogStore'
 const SUPABASE_URL = 'https://fxhkzstvxljlohrlgyyc.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4aGt6c3R2eGxqbG9ocmxneXljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MzA1OTMsImV4cCI6MjA5MTQwNjU5M30.BHoDE8V0ZLclkvSBdrFkAeqCQAkHW1j3IxzwchJh9B8'
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
+/** Clave de localStorage donde supabase-js guarda la sesión de Supabase Auth. */
+const AUTH_STORAGE_KEY = 'fitlog-supabase-auth'
+
+// La clave anon es pública por diseño: la seguridad la ponen Supabase Auth + RLS
+// (ver supabase_v2.8.0.sql). Sin sesión, la API no devuelve ningún dato.
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    storageKey: AUTH_STORAGE_KEY,
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+  },
+})
+
+/** Email interno de Supabase Auth para un usuario (no es un buzón real; la app no envía correos). */
+function emailAuth(usuarioId: string): string {
+  return `${usuarioId}@fitlog.invalid`
+}
 
 // ---------------------------------------------------------------------------
 // Helper de paginación — Supabase limita a 1000 filas por defecto
@@ -67,6 +84,14 @@ export interface UsuarioActivo {
   puedePesoCorporal?: boolean
 }
 
+/**
+ * Estado de acceso (calculado en el servidor, RPC listar_usuarios_login):
+ *  - activo:    tiene contraseña en Supabase Auth
+ *  - migrar:    aún tiene la contraseña de la app antigua → debe elegir una nueva
+ *  - pendiente: necesita un código de acceso que le da un administrador
+ */
+export type EstadoAcceso = 'activo' | 'migrar' | 'pendiente'
+
 export interface UsuarioSupabase {
   id: string
   nombre: string
@@ -77,8 +102,14 @@ export interface UsuarioSupabase {
   es_admin: boolean
   puede_peso_corporal?: boolean
   created_at?: string
-  /** true si el usuario ya tiene contraseña establecida (derivado de password_hash, nunca se expone el hash) */
-  tiene_password?: boolean
+  estado_acceso?: EstadoAcceso
+}
+
+/** Entrada del desplegable del login (lo único que ve alguien sin sesión). */
+export interface UsuarioLogin {
+  id: string
+  nombre: string
+  estado: EstadoAcceso
 }
 
 // ── Perfil visto por admin ──────────────────────────────────────────────────
@@ -133,8 +164,36 @@ export function setUsuarioActivo(u: UsuarioActivo): void {
   localStorage.setItem('fitlog_usuario_activo', JSON.stringify(u))
 }
 
-export function cerrarSesionLocal(): void {
+/** Olvida el usuario activo local (sin tocar la sesión de Supabase Auth). */
+export function olvidarUsuarioActivo(): void {
   localStorage.removeItem('fitlog_usuario_activo')
+  clearPerfilVisto()
+}
+
+export function cerrarSesionLocal(): void {
+  olvidarUsuarioActivo()
+  // scope 'local': cierra solo este dispositivo (el móvil del entrenador sigue dentro).
+  // Sin red, signOut devuelve error y NO borra la sesión guardada: se borra a mano.
+  supabase.auth.signOut({ scope: 'local' })
+    .then(({ error }) => { if (error) localStorage.removeItem(AUTH_STORAGE_KEY) })
+    .catch(() => localStorage.removeItem(AUTH_STORAGE_KEY))
+}
+
+/**
+ * Comprueba si hay sesión de Supabase Auth en este dispositivo.
+ *  - 'si'       → hay sesión
+ *  - 'no'       → no hay sesión (hay que volver a entrar)
+ *  - 'sin-red'  → no se ha podido confirmar (p. ej. token caducado y sin conexión):
+ *                 NO se debe echar al usuario, la app sigue funcionando offline
+ */
+export async function estadoSesionAuth(): Promise<'si' | 'no' | 'sin-red'> {
+  try {
+    const { data, error } = await supabase.auth.getSession()
+    if (data.session) return 'si'
+    return error ? 'sin-red' : 'no'
+  } catch {
+    return 'sin-red'
+  }
 }
 
 /** UUID fijo de Rubén en Supabase — nunca cambia, nunca se genera uno nuevo. */
@@ -146,106 +205,138 @@ export function getRubenUUID(): string {
   return RUBEN_UUID
 }
 
-/**
- * Garantiza que Rubén tiene una fila en la tabla `usuarios` de Supabase.
- * Es necesario porque `entrenos` y `registros_peso` tienen FK → `usuarios.id`.
- * Usa upsert con ignoreDuplicates para que sea idempotente (seguro llamarlo
- * varias veces sin crear duplicados).
- */
-/**
- * Verifica que Rubén tiene fila en la tabla usuarios (FK constraint).
- * Usa ignoreDuplicates: true — si ya existe NO actualiza nada (no toca password_hash).
- * Siempre usa RUBEN_UUID, ignorando el parámetro uuid para evitar inserts con UUID aleatorio.
- */
-export async function asegurarUsuarioRuben(_uuid?: string): Promise<void> {
-  const { error } = await supabase
+// ---------------------------------------------------------------------------
+// Autenticación (Supabase Auth + RPC de supabase_v2.8.0.sql)
+//
+// Las contraseñas solo viajan por HTTPS a Supabase y se guardan con bcrypt en
+// el servidor. El cliente nunca ve hashes. Las RPC de contraseña devuelven un
+// código de resultado en vez de lanzar error, para que el servidor pueda
+// contar los intentos fallidos (máx. 5).
+// ---------------------------------------------------------------------------
+
+/** Longitud mínima de contraseña (la misma que valida el servidor). */
+export const PASSWORD_MIN = 8
+
+/** Error con mensaje ya listo para mostrar al usuario. */
+export class ErrorAcceso extends Error {}
+
+const MENSAJES_ACCESO: Record<string, string> = {
+  incorrecta:        'Contraseña incorrecta.',
+  bloqueado:         'Demasiados intentos fallidos. Pide a un administrador un código de acceso (Usuarios → Restablecer).',
+  no_aplica:         'Esta cuenta ya no usa la contraseña antigua. Vuelve a la pantalla de inicio y entra con tu contraseña.',
+  password_invalida: `La contraseña nueva debe tener al menos ${PASSWORD_MIN} caracteres.`,
+  password_igual:    'La contraseña nueva debe ser distinta de la antigua.',
+  codigo_invalido:   'Código incorrecto o caducado. Pide uno nuevo a un administrador.',
+}
+
+function errorDeResultado(res: unknown): ErrorAcceso {
+  return new ErrorAcceso(MENSAJES_ACCESO[String(res)] ?? 'No se pudo completar la operación.')
+}
+
+/** Lista para el desplegable del login (funciona sin sesión: solo id, nombre y estado). */
+export async function listarUsuariosLogin(): Promise<UsuarioLogin[]> {
+  const { data, error } = await supabase.rpc('listar_usuarios_login')
+  if (error) {
+    // PGRST202 = la función no existe: la app es v2.8.0 pero falta el SQL en Supabase
+    if (error.code === 'PGRST202') throw new ErrorAcceso('Falta actualizar la base de datos (ejecutar supabase_v2.8.0.sql en Supabase).')
+    throw error
+  }
+  return (data ?? []) as UsuarioLogin[]
+}
+
+/** Inicia sesión en Supabase Auth y devuelve la fila de `usuarios` del propio usuario. */
+export async function iniciarSesion(usuarioId: string, password: string): Promise<UsuarioSupabase> {
+  const { error } = await supabase.auth.signInWithPassword({ email: emailAuth(usuarioId), password })
+  if (error) {
+    if (error.code === 'invalid_credentials' || error.status === 400) {
+      throw new ErrorAcceso('Usuario o contraseña incorrectos.')
+    }
+    if (error.status === 429) {
+      throw new ErrorAcceso('Demasiados intentos seguidos. Espera unos minutos y vuelve a probar.')
+    }
+    throw error
+  }
+  const { data, error: errPerfil } = await supabase
     .from('usuarios')
-    .upsert(
-      { id: RUBEN_UUID, nombre: 'Rubén', es_admin: true, puede_peso_corporal: true },
-      { onConflict: 'id', ignoreDuplicates: true },
-    )
+    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, puede_peso_corporal, created_at')
+    .eq('id', usuarioId)
+    .single()
+  if (errPerfil) {
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => {})
+    throw errPerfil
+  }
+  return data as UsuarioSupabase
+}
+
+/** Comprueba la contraseña de la app antigua (paso previo a elegir una nueva). */
+export async function comprobarPasswordAntigua(usuarioId: string, password: string): Promise<void> {
+  const { data, error } = await supabase.rpc('comprobar_password_legacy', {
+    p_usuario_id: usuarioId, p_password: password,
+  })
   if (error) throw error
+  if (data !== 'ok') throw errorDeResultado(data)
+}
+
+/** Sustituye la contraseña antigua por una nueva en Supabase Auth y entra. */
+export async function migrarPasswordAntigua(
+  usuarioId: string, passwordActual: string, passwordNueva: string,
+): Promise<UsuarioSupabase> {
+  const { data, error } = await supabase.rpc('migrar_password_legacy', {
+    p_usuario_id: usuarioId, p_password_actual: passwordActual, p_password_nueva: passwordNueva,
+  })
+  if (error) throw error
+  if (data !== 'ok') throw errorDeResultado(data)
+  return iniciarSesion(usuarioId, passwordNueva)
+}
+
+/** Crea la contraseña con el código de un solo uso que da un administrador, y entra. */
+export async function activarCuentaConCodigo(
+  usuarioId: string, codigo: string, passwordNueva: string,
+): Promise<UsuarioSupabase> {
+  const { data, error } = await supabase.rpc('activar_cuenta_con_codigo', {
+    p_usuario_id: usuarioId, p_codigo: codigo, p_password_nueva: passwordNueva,
+  })
+  if (error) throw error
+  if (data !== 'ok') throw errorDeResultado(data)
+  return iniciarSesion(usuarioId, passwordNueva)
 }
 
 // ---------------------------------------------------------------------------
-// Hash de contraseña (Web Crypto API — nativa en todos los navegadores)
-// ---------------------------------------------------------------------------
-
-export async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(password)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-// ---------------------------------------------------------------------------
-// CRUD de usuarios
+// Gestión de usuarios (admin). RLS: el admin ve y edita todas las filas;
+// altas, bajas y restablecimientos van por RPC porque tocan Supabase Auth.
 // ---------------------------------------------------------------------------
 
 export async function obtenerUsuarios(): Promise<UsuarioSupabase[]> {
-  const { data, error } = await supabase
-    .from('usuarios')
-    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, puede_peso_corporal, created_at, password_hash')
-    .order('created_at', { ascending: true })
+  const [{ data, error }, estados] = await Promise.all([
+    supabase
+      .from('usuarios')
+      .select('id, nombre, email, edad, altura_cm, sexo, es_admin, puede_peso_corporal, created_at')
+      .order('created_at', { ascending: true }),
+    listarUsuariosLogin().catch(() => [] as UsuarioLogin[]),
+  ])
   if (error) throw error
-  // Exponer solo si tiene contraseña, nunca el hash
-  return (data ?? []).map(({ password_hash, ...u }) => ({
+  const estadoPorId = new Map(estados.map((e) => [e.id, e.estado]))
+  return (data ?? []).map((u) => ({
     ...(u as UsuarioSupabase),
-    tiene_password: !!password_hash,
+    estado_acceso: estadoPorId.get(u.id as string),
   }))
 }
 
 /**
- * Restablece la contraseña de un usuario: deja password_hash a NULL, de modo
- * que en su siguiente acceso la app le pide crear una contraseña nueva
- * (flujo de "primer acceso"). La app no guarda contraseñas ni envía emails.
+ * Restablece el acceso de un usuario: borra su contraseña, cierra sus sesiones
+ * y devuelve un código de un solo uso (7 días) que el admin le debe pasar.
  */
-export async function restablecerPassword(userId: string): Promise<void> {
-  const { error } = await supabase
-    .from('usuarios')
-    .update({ password_hash: null })
-    .eq('id', userId)
+export async function restablecerPassword(userId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('admin_restablecer_acceso', { p_usuario_id: userId })
   if (error) throw error
+  return data as string
 }
 
-export async function verificarPassword(userId: string, password: string): Promise<boolean> {
-  const hash = await hashPassword(password)
-  const { data, error } = await supabase
-    .from('usuarios')
-    .select('id')
-    .eq('id', userId)
-    .eq('password_hash', hash)
-    .maybeSingle()
-  if (error) return false
-  return !!data
-}
-
-export async function crearUsuario(datos: {
-  nombre: string
-  email?: string
-  password?: string   // opcional: si no se pasa, password_hash queda null (primer acceso)
-  edad?: number
-  altura_cm?: number
-  sexo?: 'hombre' | 'mujer'
-}): Promise<UsuarioSupabase> {
-  const password_hash = datos.password ? await hashPassword(datos.password) : null
-  const { data, error } = await supabase
-    .from('usuarios')
-    .insert({
-      nombre: datos.nombre,
-      email: datos.email || null,
-      password_hash,
-      edad: datos.edad || null,
-      altura_cm: datos.altura_cm || null,
-      sexo: datos.sexo || null,
-      es_admin: false,
-      puede_peso_corporal: false,
-    })
-    .select('id, nombre, email, edad, altura_cm, sexo, es_admin, puede_peso_corporal, created_at')
-    .single()
+/** Crea un usuario (con su cuenta de Supabase Auth) y devuelve su código de acceso. */
+export async function crearUsuario(datos: { nombre: string }): Promise<{ id: string; nombre: string; codigo: string }> {
+  const { data, error } = await supabase.rpc('admin_crear_usuario', { p_nombre: datos.nombre })
   if (error) throw error
-  return data as UsuarioSupabase
+  return data as { id: string; nombre: string; codigo: string }
 }
 
 export async function actualizarUsuario(
@@ -253,7 +344,6 @@ export async function actualizarUsuario(
   datos: {
     nombre?: string
     email?: string
-    password?: string
     edad?: number
     altura_cm?: number
     sexo?: 'hombre' | 'mujer'
@@ -270,35 +360,16 @@ export async function actualizarUsuario(
   if (datos.sexo !== undefined)                update.sexo                = datos.sexo || null
   if (datos.es_admin !== undefined)            update.es_admin            = datos.es_admin
   if (datos.puede_peso_corporal !== undefined) update.puede_peso_corporal = datos.puede_peso_corporal
-  if (datos.password)                          update.password_hash       = await hashPassword(datos.password)
 
-  const { error } = await supabase.from('usuarios').update(update).eq('id', id)
+  // .select() para detectar el caso "0 filas" (RLS: solo un admin puede editar)
+  const { data, error } = await supabase.from('usuarios').update(update).eq('id', id).select('id')
   if (error) throw error
+  if (!data || data.length === 0) throw new Error('Sin permiso para editar este usuario')
 }
 
-/** Devuelve true si el usuario no tiene contraseña establecida (primer acceso). */
-export async function tienePasswordVacio(userId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('usuarios')
-    .select('password_hash')
-    .eq('id', userId)
-    .single()
-  if (error) return false
-  return !data?.password_hash
-}
-
-/** Establece la contraseña de un usuario (usado en el primer acceso). */
-export async function establecerPassword(userId: string, password: string): Promise<void> {
-  const hash = await hashPassword(password)
-  const { error } = await supabase
-    .from('usuarios')
-    .update({ password_hash: hash })
-    .eq('id', userId)
-  if (error) throw error
-}
-
+/** Elimina un usuario, todos sus datos y su cuenta de Supabase Auth. */
 export async function eliminarUsuario(id: string): Promise<void> {
-  const { error } = await supabase.from('usuarios').delete().eq('id', id)
+  const { error } = await supabase.rpc('admin_eliminar_usuario', { p_usuario_id: id })
   if (error) throw error
 }
 
@@ -600,7 +671,6 @@ export async function respaldarConfigEjerciciosSiFalta(): Promise<void> {
   const remotos = await obtenerEjerciciosUsuario(uid)
   if (remotos !== null) return // ya hay config remota — no tocar
 
-  if (usuario.esRuben) await asegurarUsuarioRuben() // FK entrenos/ejercicios → usuarios.id
   await sincronizarEjerciciosUsuario(uid, ejerciciosLocales)
   console.log(`[Supabase] Config de ejercicios respaldada en ejercicios_usuario (${ejerciciosLocales.length} ejercicios)`)
 }
